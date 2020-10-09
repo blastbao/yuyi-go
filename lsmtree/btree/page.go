@@ -166,8 +166,14 @@ type PageBufferForDump struct {
 	// dirty if the page's content is modified
 	dirty bool
 
+	// valid if the page is valid to writing to disk
+	valid bool
+
 	// size the size of the page
 	size int
+
+	// shadowKey the deleted mapping key
+	shadowKey memtable.Key
 }
 
 func (page *PageBufferForDump) AddKV(key memtable.Key, value memtable.Value, index int) {
@@ -192,16 +198,23 @@ func (page *PageBufferForDump) AddKV(key memtable.Key, value memtable.Value, ind
 	page.Entries = entries
 }
 
-func (page *PageBufferForDump) AddKVPair(pair *memtable.KVPair) {
+func (page *PageBufferForDump) mappingKey() memtable.Key {
+	if page.shadowKey != nil {
+		return page.shadowKey
+	}
+	return page.Key(0)
+}
+
+func (page *PageBufferForDump) addKVPair(pair *memtable.KVPair) {
 	index := page.Search(&pair.Key)
 	page.AddKV(pair.Key, pair.Value, index)
 }
 
-func (page *PageBufferForDump) AddKVEntryToIndex(entry *memtable.KVEntry, index int) {
+func (page *PageBufferForDump) addKVEntryToIndex(entry *memtable.KVEntry, index int) {
 	page.AddKV(entry.Key, entry.TableValue.Value, index)
 }
 
-func (page *PageBufferForDump) RemoveKVEntry(index int) {
+func (page *PageBufferForDump) removeKVEntry(index int) {
 	entries := page.AllEntries()
 
 	leftPart := entries[0:index:index]
@@ -209,7 +222,7 @@ func (page *PageBufferForDump) RemoveKVEntry(index int) {
 	page.Entries = append(leftPart, right...)
 }
 
-func (page *PageBufferForDump) BuildCompressedBytes() []byte {
+func (page *PageBufferForDump) buildCompressedBytes() []byte {
 	if !page.dirty {
 		return page.Content
 	}

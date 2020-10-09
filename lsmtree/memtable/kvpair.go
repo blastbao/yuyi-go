@@ -42,6 +42,6 @@ type KVEntry struct {
 	TableValue TableValue
 }
 
-func (key *Key) Compare(another *Key) int {
+func (key Key) Compare(another Key) int {
 	return 0
 }
