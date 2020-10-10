@@ -176,7 +176,7 @@ type PageBufferForDump struct {
 	shadowKey memtable.Key
 }
 
-func (page *PageBufferForDump) AddKV(key memtable.Key, value memtable.Value, index int) {
+func (page *PageBufferForDump) AddKVToIndex(key memtable.Key, value memtable.Value, index int) {
 	entries := page.AllEntries()
 	if index < 0 {
 		index = -index - 1
@@ -205,13 +205,18 @@ func (page *PageBufferForDump) mappingKey() memtable.Key {
 	return page.Key(0)
 }
 
+func (page *PageBufferForDump) addKV(key memtable.Key, value memtable.Value) {
+	index := page.Search(&key)
+	page.AddKVToIndex(key, value, index)
+}
+
 func (page *PageBufferForDump) addKVPair(pair *memtable.KVPair) {
 	index := page.Search(&pair.Key)
-	page.AddKV(pair.Key, pair.Value, index)
+	page.AddKVToIndex(pair.Key, pair.Value, index)
 }
 
 func (page *PageBufferForDump) addKVEntryToIndex(entry *memtable.KVEntry, index int) {
-	page.AddKV(entry.Key, entry.TableValue.Value, index)
+	page.AddKVToIndex(entry.Key, entry.TableValue.Value, index)
 }
 
 func (page *PageBufferForDump) removeKVEntry(index int) {

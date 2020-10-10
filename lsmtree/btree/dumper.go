@@ -52,7 +52,7 @@ func toSlice(tables []*memtable.MemTable) []*memtable.KVEntry {
 }
 
 func (dumper Dumper) internalDump(btree *BTree, entries []*memtable.KVEntry) {
-	context := DumpContext{
+	ctx := &DumpContext{
 		path:      nil,
 		committed: map[int]map[Address][]*PageBufferForDump{},
 	}
@@ -64,27 +64,27 @@ func (dumper Dumper) internalDump(btree *BTree, entries []*memtable.KVEntry) {
 		if entry.TableValue.Operation == memtable.Remove {
 			if i > lastIndex {
 				putEntries := entries[lastIndex : i+1 : i+1]
-				dumper.putEntries(putEntries, context)
+				dumper.putEntries(putEntries, ctx)
 			}
-			dumper.removeEntry(entry, context)
+			dumper.removeEntry(entry, ctx)
 			lastIndex = i + 1
 		}
 	}
 	if lastIndex < len(entries) {
 		putEntries := entries[lastIndex:len(entries):len(entries)]
-		dumper.putEntries(putEntries, context)
-		dumper.checkForCommit(context, nil)
+		dumper.putEntries(putEntries, ctx)
+		dumper.checkForCommit(ctx, nil)
 	}
 }
 
-func (dumper *Dumper) putEntries(putEntries []*memtable.KVEntry, ctx DumpContext) {
+func (dumper *Dumper) putEntries(putEntries []*memtable.KVEntry, ctx *DumpContext) {
 	var rightSibling memtable.Key
 	path := ctx.path
 	for _, entry := range putEntries {
 		// check path
 		if path == nil || (rightSibling != nil && rightSibling.Compare(entry.Key) <= 0) {
 			// need fetch path cause origin path is nil/invalid
-			path = dumper.fetchPageForDumper(&dumper.root, &entry.Key)
+			path = dumper.fetchPathForDumper(&dumper.root, &entry.Key)
 
 			// check with new path to commit pages that is writable
 			dumper.checkForCommit(ctx, path)
@@ -104,27 +104,25 @@ func (dumper *Dumper) putEntries(putEntries []*memtable.KVEntry, ctx DumpContext
 	}
 }
 
-func (dumper *Dumper) removeEntry(entry *memtable.KVEntry, ctx DumpContext) {
+func (dumper *Dumper) removeEntry(entry *memtable.KVEntry, ctx *DumpContext) {
 	if !dumper.filter.MightContains(&entry.Key) {
 		return
 	}
-	path := dumper.fetchPageForDumper(&dumper.root, &entry.Key)
+	path := dumper.fetchPathForDumper(&dumper.root, &entry.Key)
+
 	leafPage := path[len(path)-1].page
 	index := leafPage.Search(&entry.Key)
 	if index < 0 {
 		return
-	} else {
-		// key exists update filter first
-		dumper.filter.Remove(&entry.Key)
-
-		// modify page's content
-		leafPage.removeKVEntry(index)
 	}
-	// check if need merge page for balance
-	path = dumper.checkForMerge(path)
+	// key exists update filter first
+	dumper.filter.Remove(&entry.Key)
+
+	// modify page's content
+	leafPage.removeKVEntry(index)
 }
 
-func (dumper *Dumper) fetchPageForDumper(root *PageBuffer, key *memtable.Key) []*PathItemForDump {
+func (dumper *Dumper) fetchPathForDumper(root *PageBuffer, key *memtable.Key) []*PathItemForDump {
 	// Todo: Should consider pages that already cached in dumper cache
 	path := dumper.btree.FindPathToLeaf(root, key)
 	pathForDump := make([]*PathItemForDump, len(path))
@@ -135,6 +133,10 @@ func (dumper *Dumper) fetchPageForDumper(root *PageBuffer, key *memtable.Key) []
 		dumper.cache[item.page.Address] = &pathForDump[i].page
 	}
 	return pathForDump
+}
+
+func (dumper *Dumper) fetchPageForDumper(addr Address) *PageBufferForDump {
+	return nil
 }
 
 func (dumper *Dumper) findRightSibling(path []*PathItemForDump) memtable.Key {
@@ -150,7 +152,7 @@ func (dumper *Dumper) findRightSibling(path []*PathItemForDump) memtable.Key {
 	return nil
 }
 
-func (dumper *Dumper) checkForCommit(ctx DumpContext, newPath []*PathItemForDump) {
+func (dumper *Dumper) checkForCommit(ctx *DumpContext, newPath []*PathItemForDump) {
 	path := ctx.path
 	if path == nil {
 		return
@@ -169,7 +171,7 @@ func (dumper *Dumper) checkForCommit(ctx DumpContext, newPath []*PathItemForDump
 			}
 			// should flush writable pages before splitting index page
 			if pathItem.page.Type() == Index {
-				dumper.flush()
+				dumper.flush(ctx)
 			}
 
 			// split current page, decommission current page
@@ -217,10 +219,32 @@ func (dumper *Dumper) checkForMerge(path []*PathItemForDump) []*PathItemForDump 
 	return nil
 }
 
-func (dumper *Dumper) flush() {
+func (dumper *Dumper) flush(ctx *DumpContext) {
+	// flush writable page from bottom to up, leaf to index
+	depth := len(ctx.committed)
+	for level := depth - 1; level >= 0; level++ {
+		for parentAddr, pages := range ctx.committed[level] {
+			parent := dumper.cache[parentAddr]
+			for i, addr := range dumper.writePages(pages, parentAddr) {
+				page := pages[i]
+				if page.shadowKey != nil {
+					// remove shadow key and replace with current first key
+					parent.removeKVEntry(parent.Search(&page.shadowKey))
+					page.shadowKey = nil
+				}
+				parent.addKV(page.mappingKey(), addr.ToValue())
+				dumper.decommissionPage(page)
+			}
+		}
+	}
 	return
 }
 
+func (dumper *Dumper) writePages(pages []*PageBufferForDump, addr Address) []Address {
+	return nil
+}
+
+// DumpContext the context for b+ tree dump progress
 type DumpContext struct {
 	// path the path found in last round put/remove entries
 	path []*PathItemForDump
