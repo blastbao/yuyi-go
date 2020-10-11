@@ -14,7 +14,11 @@
 
 package shared
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/binary"
+	"log"
+)
 
 func BytesCompare(bytes1 []byte, bytes2 []byte) int {
 	len1 := len(bytes1)
@@ -57,14 +61,20 @@ func WriteByte(buffer *bytes.Buffer, c byte) {
 	buffer.WriteByte(c)
 }
 
-func WriteInt16(buffer *bytes.Buffer, i int16) {
-	buffer.WriteByte(byte(i >> 8))
-	buffer.WriteByte(byte(i))
+func WriteString(buffer *bytes.Buffer, s string) {
+	buffer.WriteString(s)
 }
 
-func WriteInt(buffer *bytes.Buffer, i int) {
-	buffer.WriteByte(byte(i >> 24))
-	buffer.WriteByte(byte(i >> 16))
-	buffer.WriteByte(byte(i >> 8))
-	buffer.WriteByte(byte(i))
+func WriteInt16(buffer *bytes.Buffer, i int16) {
+	err := binary.Write(buffer, binary.BigEndian, i)
+	if err != nil {
+		log.Panic("Write short to buffer failed.")
+	}
+}
+
+func WriteInt32(buffer *bytes.Buffer, i int32) {
+	err := binary.Write(buffer, binary.BigEndian, i)
+	if err != nil {
+		log.Panic("Write int to buffer failed.")
+	}
 }

@@ -18,11 +18,11 @@ import (
 	"yuyi-go/lsmtree/memtable"
 )
 
-var TreeDepth int8
+var treeDepth int8
 
 func init() {
 	// find path from root to leaf with empty key to determine current tree depth
-	TreeDepth = 3
+	treeDepth = 0
 }
 
 type BTree struct {
@@ -32,19 +32,19 @@ type BTree struct {
 
 type TreeInfo struct {
 	// root the root page of the copy-on-write b+ tree.
-	root PageBuffer
+	root page
 
 	// filter the filter for quick filter key
 	filter Filter
 }
 
-type PathItem struct {
-	page  PageBuffer
+type pathItem struct {
+	page  page
 	index int
 }
 
-type PathItemForDump struct {
-	page  PageBufferForDump
+type pathItemForDump struct {
+	page  pageForDump
 	index int
 }
 
@@ -97,10 +97,10 @@ func (tree *BTree) ReverseListOnPrefix(prefix memtable.Key, max uint16) []*memta
 }
 
 // FindPathToLeaf find the path from root page to leaf page with the specified key
-func (tree *BTree) FindPathToLeaf(root *PageBuffer, key *memtable.Key) []*PathItem {
+func (tree *BTree) FindPathToLeaf(root *page, key *memtable.Key) []*pathItem {
 	// create result slice and put root to the result
-	res := make([]*PathItem, TreeDepth, TreeDepth)
-	res[0] = &PathItem{*root, 0}
+	res := make([]*pathItem, treeDepth, treeDepth)
+	res[0] = &pathItem{*root, 0}
 
 	parent := root
 	depth := 1
@@ -112,7 +112,7 @@ func (tree *BTree) FindPathToLeaf(root *PageBuffer, key *memtable.Key) []*PathIt
 		// find child page with the found index and push it in result.
 		childAddress := parent.ChildAddress(index)
 		childPage := readPage(childAddress)
-		res[depth] = &PathItem{childPage, index}
+		res[depth] = &pathItem{*childPage, index}
 
 		if childPage.Type() == Leaf {
 			// found leaf page, search end
@@ -129,6 +129,11 @@ func mightContains(treeInfo *TreeInfo, key *memtable.Key) bool {
 	return true
 }
 
-func readPage(address Address) PageBuffer {
-	return PageBuffer{}
+func readPage(addr address) *page {
+	content := ReadFrom(addr)
+	return &page{
+		content: content,
+		entries: nil,
+		addr:    addr,
+	}
 }

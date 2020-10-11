@@ -36,3 +36,26 @@ type Filter interface {
 
 type CocoFilter struct {
 }
+
+type dummyFilter struct {
+}
+
+// Put put the specified key in filter.
+func (filter *dummyFilter) Put(key *memtable.Key) {
+	return
+}
+
+// Remove remove the specified key from filter.
+func (filter *dummyFilter) Remove(key *memtable.Key) {
+	return
+}
+
+// SupportRemove if the filter support remove key from itself.
+func (filter *dummyFilter) SupportRemove() bool {
+	return false
+}
+
+// MightContains if the specified key may already existed.
+func (filter *dummyFilter) MightContains(key *memtable.Key) bool {
+	return true
+}

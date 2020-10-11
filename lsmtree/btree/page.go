@@ -32,26 +32,42 @@ const (
 const (
 	Version1 = byte(1)
 
-	TypeOffset    = 1
-	KVCountOffset = 2
-	KeyOffset     = 4
-
 	VersionSize     = 1
 	TypeSize        = 1
+	KeyCountSize    = 2
 	KeyOffsetSize   = 4
 	ValueOffsetSize = 4
+
+	TypeOffset    = VersionSize
+	KVCountOffset = VersionSize + TypeSize
+	KeyOffset     = VersionSize + TypeSize + KeyCountSize
 )
 
-// PageBuffer the basic unit for a btree.
-type PageBuffer struct {
-	Content []byte
-	Entries []*memtable.KVPair
-	Address Address
+// page the basic unit for a btree.
+type page struct {
+	content []byte
+	entries []*memtable.KVPair
+	addr    address
+}
+
+func createPage(pageType PageType) *page {
+	return &page{
+		content: createEmptyContent(pageType),
+		entries: make([]*memtable.KVPair, 0),
+		addr:    createFakeAddr(),
+	}
+}
+
+func createEmptyContent(pageType PageType) []byte {
+	var array [VersionSize + TypeSize + KeyCountSize]byte
+	array[0] = Version1
+	array[1] = byte(pageType)
+	return array[0:]
 }
 
 // Type get the type of the page
-func (page *PageBuffer) Type() PageType {
-	switch page.Content[TypeOffset] {
+func (page *page) Type() PageType {
+	switch page.content[TypeOffset] {
 	case 1:
 		return Root
 	case 2:
@@ -64,15 +80,15 @@ func (page *PageBuffer) Type() PageType {
 }
 
 // KVPairsCount
-func (page *PageBuffer) KVPairsCount() int {
-	if page.Entries != nil {
-		return len(page.Entries)
+func (page *page) KVPairsCount() int {
+	if page.entries != nil {
+		return len(page.entries)
 	}
-	return int(shared.ReadInt16(page.Content, KVCountOffset))
+	return int(shared.ReadInt16(page.content, KVCountOffset))
 }
 
 // Search find the location with the specified key.
-func (page *PageBuffer) Search(key *memtable.Key) int {
+func (page *page) Search(key *memtable.Key) int {
 	low := 0
 	high := page.KVPairsCount() - 1
 
@@ -92,24 +108,24 @@ func (page *PageBuffer) Search(key *memtable.Key) int {
 }
 
 // Key get key in the page with the specified index
-func (page *PageBuffer) Key(index int) memtable.Key {
-	if page.Entries != nil {
-		return page.Entries[index].Key
+func (page *page) Key(index int) memtable.Key {
+	if page.entries != nil {
+		return page.entries[index].Key
 	}
 	var start int
 	if index == 0 {
 		start = KeyOffset
 	} else {
-		start = shared.ReadInt(page.Content, KeyOffset+int(index-1)*KeyOffsetSize)
+		start = shared.ReadInt(page.content, KeyOffset+int(index-1)*KeyOffsetSize)
 	}
-	end := shared.ReadInt(page.Content, KeyOffset+int(index)*KeyOffsetSize)
-	return page.Content[start:end:end]
+	end := shared.ReadInt(page.content, KeyOffset+int(index)*KeyOffsetSize)
+	return page.content[start:end:end]
 }
 
 // Value get value in the page with the specified index
-func (page *PageBuffer) Value(index int) memtable.Value {
-	if page.Entries != nil {
-		return page.Entries[index].Value
+func (page *page) Value(index int) memtable.Value {
+	if page.entries != nil {
+		return page.entries[index].Value
 	}
 	kvCount := page.KVPairsCount()
 	valueOffset := KeyOffset + kvCount*KeyOffsetSize
@@ -117,51 +133,51 @@ func (page *PageBuffer) Value(index int) memtable.Value {
 	if index == 0 {
 		start = KeyOffset + kvCount*KeyOffsetSize
 	} else {
-		start = shared.ReadInt(page.Content, valueOffset+(index-1)*KeyOffsetSize)
+		start = shared.ReadInt(page.content, valueOffset+(index-1)*KeyOffsetSize)
 	}
-	end := shared.ReadInt(page.Content, valueOffset+index*KeyOffsetSize)
-	return page.Content[start:end:end]
+	end := shared.ReadInt(page.content, valueOffset+index*KeyOffsetSize)
+	return page.content[start:end:end]
 }
 
-// Address get the child page address in the page with the specified index
-func (page *PageBuffer) ChildAddress(index int) Address {
+// address get the child page address in the page with the specified index
+func (page *page) ChildAddress(index int) address {
 	value := page.Value(index)
 	return CreateAddress(value)
 }
 
 // KVPair get key/value pair in the page with the specified index
-func (page *PageBuffer) KVPair(index int) *memtable.KVPair {
-	if page.Entries != nil {
-		return page.Entries[index]
+func (page *page) KVPair(index int) *memtable.KVPair {
+	if page.entries != nil {
+		return page.entries[index]
 	}
 	return &memtable.KVPair{Key: page.Key(index), Value: page.Value(index)}
 }
 
 // FloorEntry
-func (page *PageBuffer) FloorEntry(key *memtable.Key) *memtable.KVPair {
+func (page *page) FloorEntry(key *memtable.Key) *memtable.KVPair {
 	return nil
 }
 
 // CeilingEntry
-func (page *PageBuffer) CeilingEntry(key *memtable.Key) *memtable.KVPair {
+func (page *page) CeilingEntry(key *memtable.Key) *memtable.KVPair {
 	return nil
 }
 
 // AllEntries get all key-value entries of the page buffer
-func (page *PageBuffer) AllEntries() []*memtable.KVPair {
-	if page.Entries == nil {
+func (page *page) AllEntries() []*memtable.KVPair {
+	if page.entries == nil {
 		kvCount := page.KVPairsCount()
-		page.Entries = make([]*memtable.KVPair, kvCount)
+		page.entries = make([]*memtable.KVPair, kvCount)
 		for i := int(0); i < kvCount; i++ {
-			page.Entries[i] = &memtable.KVPair{Key: page.Key(i), Value: page.Value(i)}
+			page.entries[i] = &memtable.KVPair{Key: page.Key(i), Value: page.Value(i)}
 		}
 	}
-	return page.Entries
+	return page.entries
 }
 
-type PageBufferForDump struct {
-	// PageBuffer the page for dump
-	PageBuffer
+type pageForDump struct {
+	// page the page for dump
+	page
 
 	// dirty if the page's content is modified
 	dirty bool
@@ -176,7 +192,7 @@ type PageBufferForDump struct {
 	shadowKey memtable.Key
 }
 
-func (page *PageBufferForDump) AddKVToIndex(key memtable.Key, value memtable.Value, index int) {
+func (page *pageForDump) addKVToIndex(key memtable.Key, value memtable.Value, index int) {
 	entries := page.AllEntries()
 	if index < 0 {
 		index = -index - 1
@@ -195,41 +211,41 @@ func (page *PageBufferForDump) AddKVToIndex(key memtable.Key, value memtable.Val
 		entries[index] = &memtable.KVPair{Key: key, Value: value}
 	}
 	// update entries of the page
-	page.Entries = entries
+	page.entries = entries
 }
 
-func (page *PageBufferForDump) mappingKey() memtable.Key {
+func (page *pageForDump) mappingKey() memtable.Key {
 	if page.shadowKey != nil {
 		return page.shadowKey
 	}
 	return page.Key(0)
 }
 
-func (page *PageBufferForDump) addKV(key memtable.Key, value memtable.Value) {
+func (page *pageForDump) addKV(key memtable.Key, value memtable.Value) {
 	index := page.Search(&key)
-	page.AddKVToIndex(key, value, index)
+	page.addKVToIndex(key, value, index)
 }
 
-func (page *PageBufferForDump) addKVPair(pair *memtable.KVPair) {
+func (page *pageForDump) addKVPair(pair *memtable.KVPair) {
 	index := page.Search(&pair.Key)
-	page.AddKVToIndex(pair.Key, pair.Value, index)
+	page.addKVToIndex(pair.Key, pair.Value, index)
 }
 
-func (page *PageBufferForDump) addKVEntryToIndex(entry *memtable.KVEntry, index int) {
-	page.AddKVToIndex(entry.Key, entry.TableValue.Value, index)
+func (page *pageForDump) addKVEntryToIndex(entry *memtable.KVEntry, index int) {
+	page.addKVToIndex(entry.Key, entry.TableValue.Value, index)
 }
 
-func (page *PageBufferForDump) removeKVEntry(index int) {
+func (page *pageForDump) removeKVEntry(index int) {
 	entries := page.AllEntries()
 
 	leftPart := entries[0:index:index]
 	right := entries[index+1 : len(entries) : len(entries)]
-	page.Entries = append(leftPart, right...)
+	page.entries = append(leftPart, right...)
 }
 
-func (page *PageBufferForDump) buildCompressedBytes() []byte {
+func (page *pageForDump) buildCompressedBytes() []byte {
 	if !page.dirty {
-		return page.Content
+		return page.content
 	}
 	// calculate capacity of the content
 	kvCount := page.KVPairsCount()
@@ -248,12 +264,12 @@ func (page *PageBufferForDump) buildCompressedBytes() []byte {
 	shared.WriteByte(buffer, byte(page.Type()))
 	// write key offset
 	for _, entry := range page.AllEntries() {
-		shared.WriteInt(buffer, keyOffset+len(entry.Key))
+		shared.WriteInt32(buffer, int32(keyOffset+len(entry.Key)))
 		keyOffset += len(entry.Key)
 	}
 	// write value offset
 	for _, entry := range page.AllEntries() {
-		shared.WriteInt(buffer, valueOffset+len(entry.Value))
+		shared.WriteInt32(buffer, int32(valueOffset+len(entry.Value)))
 		valueOffset += len(entry.Value)
 	}
 	// write key content

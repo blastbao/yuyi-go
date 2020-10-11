@@ -23,10 +23,10 @@ var (
 	file = uuid.NewV4().String()
 	off  = 0
 
-	cache map[Address][]byte
+	cache map[address][]byte
 )
 
-func WriteTo(input []byte) Address {
+func writeTo(input []byte) address {
 	size := len(input)
 	if off+size > MaxLength {
 		// need rotate to another file
@@ -34,12 +34,12 @@ func WriteTo(input []byte) Address {
 		off = 0
 	}
 	// create new address and cache it.
-	res := Address{File: file, Offset: off, Length: size}
+	res := address{File: file, Offset: off, Length: size}
 	cache[res] = input
 	off += size
 	return res
 }
 
-func ReadFrom(address Address) []byte {
+func ReadFrom(address address) []byte {
 	return cache[address]
 }
