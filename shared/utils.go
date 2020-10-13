@@ -49,16 +49,45 @@ func BytesCompareWithLength(bytes1 []byte, off1 int, len1 int, bytes2 []byte, of
 	return len1 - len2
 }
 
-func ReadInt16(bytes []byte, off int) int16 {
-	return int16(bytes[off])<<8 + int16(bytes[off+1])
+func ReadString(buffer *bytes.Buffer, len int) string {
+	res := make([]byte, len)
+	err := binary.Read(buffer, binary.BigEndian, res)
+	if err != nil {
+		log.Panic("Write short to buffer failed.")
+	}
+	return string(res)
 }
 
-func ReadInt(bytes []byte, off int) int {
-	return int(bytes[off])<<24 + int(bytes[off+1])<<16 + int(bytes[off+2])<<8 + int(bytes[off+3])
+func ReadInt16(buffer *bytes.Buffer) int16 {
+	var res int16
+	err := binary.Read(buffer, binary.BigEndian, &res)
+	if err != nil {
+		log.Panic("Write short to buffer failed.")
+	}
+	return res
 }
 
-func WriteByte(buffer *bytes.Buffer, c byte) {
-	buffer.WriteByte(c)
+func ReadInt32(buffer *bytes.Buffer) int32 {
+	var res int32
+	err := binary.Read(buffer, binary.BigEndian, &res)
+	if err != nil {
+		log.Panic("Write short to buffer failed.")
+	}
+	return res
+}
+
+func WriteByte(buffer *bytes.Buffer, b byte) {
+	err := binary.Write(buffer, binary.BigEndian, &b)
+	if err != nil {
+		log.Panic("Write byte to buffer failed.")
+	}
+}
+
+func WriteBytes(buffer *bytes.Buffer, bytes []byte) {
+	err := binary.Write(buffer, binary.BigEndian, &bytes)
+	if err != nil {
+		log.Panic("Write bytes to buffer failed.")
+	}
 }
 
 func WriteString(buffer *bytes.Buffer, s string) {
@@ -66,14 +95,14 @@ func WriteString(buffer *bytes.Buffer, s string) {
 }
 
 func WriteInt16(buffer *bytes.Buffer, i int16) {
-	err := binary.Write(buffer, binary.BigEndian, i)
+	err := binary.Write(buffer, binary.BigEndian, &i)
 	if err != nil {
 		log.Panic("Write short to buffer failed.")
 	}
 }
 
 func WriteInt32(buffer *bytes.Buffer, i int32) {
-	err := binary.Write(buffer, binary.BigEndian, i)
+	err := binary.Write(buffer, binary.BigEndian, &i)
 	if err != nil {
 		log.Panic("Write int to buffer failed.")
 	}

@@ -16,14 +16,14 @@ package btree
 
 import "github.com/satori/go.uuid"
 
-// MaxLength set max capacity of each file to 4M
-const MaxLength = 4 * 1024 * 1024
+// MaxLength set max capacity of each file to 512k
+const MaxLength = 512 * 1024
 
 var (
 	file = uuid.NewV4().String()
 	off  = 0
 
-	cache map[address][]byte
+	cache = map[address][]byte{}
 )
 
 func writeTo(input []byte) address {

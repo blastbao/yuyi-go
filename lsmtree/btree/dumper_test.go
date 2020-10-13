@@ -15,7 +15,9 @@
 package btree
 
 import (
+	"bytes"
 	"math/rand"
+	"sort"
 	"testing"
 	"yuyi-go/lsmtree/memtable"
 )
@@ -26,8 +28,9 @@ func TestDumper(t *testing.T) {
 	dumper := buildDumperInstance()
 
 	for i := 0; i < 10; i++ {
-		entries := randomPutKVEntry(entriesCount)
-		dumper.internalDump(entries)
+		entries := randomPutKVEntries(entriesCount)
+		c := make(chan TreeInfo, 1)
+		dumper.internalDump(entries, c)
 	}
 }
 
@@ -46,7 +49,7 @@ func buildDumperInstance() *dumper {
 var keyLen = 100
 var valueLen = 200
 
-func randomPutKVEntry(count int) []*memtable.KVEntry {
+func randomPutKVEntries(count int) []*memtable.KVEntry {
 	res := make([]*memtable.KVEntry, count)
 	for i := 0; i < count; i++ {
 		key := randomBytes(keyLen, defaultLetters)
@@ -59,6 +62,9 @@ func randomPutKVEntry(count int) []*memtable.KVEntry {
 			},
 		}
 	}
+	sort.Slice(res, func(i, j int) bool {
+		return bytes.Compare(res[i].Key, res[j].Key) <= 0
+	})
 	return res
 }
 

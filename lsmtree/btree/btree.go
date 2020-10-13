@@ -32,19 +32,19 @@ type BTree struct {
 
 type TreeInfo struct {
 	// root the root page of the copy-on-write b+ tree.
-	root page
+	root *page
 
 	// filter the filter for quick filter key
 	filter Filter
 }
 
 type pathItem struct {
-	page  page
+	page  *page
 	index int
 }
 
 type pathItemForDump struct {
-	page  pageForDump
+	page  *pageForDump
 	index int
 }
 
@@ -56,7 +56,7 @@ func (tree *BTree) Has(key *memtable.Key) bool {
 	}
 
 	// fetch the path with the specified key
-	path := tree.FindPathToLeaf(&treeInfo.root, key)
+	path := tree.FindPathToLeaf(treeInfo.root, key)
 	leaf := path[len(path)-1].page
 	return leaf.Search(key) >= 0
 }
@@ -69,7 +69,7 @@ func (tree *BTree) Get(key *memtable.Key) memtable.Value {
 	}
 
 	// fetch the path with the specified key
-	path := tree.FindPathToLeaf(&treeInfo.root, key)
+	path := tree.FindPathToLeaf(treeInfo.root, key)
 
 	leaf := path[len(path)-1].page
 	index := leaf.Search(key)
@@ -100,7 +100,7 @@ func (tree *BTree) ReverseListOnPrefix(prefix memtable.Key, max uint16) []*memta
 func (tree *BTree) FindPathToLeaf(root *page, key *memtable.Key) []*pathItem {
 	// create result slice and put root to the result
 	res := make([]*pathItem, treeDepth, treeDepth)
-	res[0] = &pathItem{*root, 0}
+	res[0] = &pathItem{root, 0}
 
 	parent := root
 	depth := 1
@@ -112,7 +112,7 @@ func (tree *BTree) FindPathToLeaf(root *page, key *memtable.Key) []*pathItem {
 		// find child page with the found index and push it in result.
 		childAddress := parent.ChildAddress(index)
 		childPage := readPage(childAddress)
-		res[depth] = &pathItem{*childPage, index}
+		res[depth] = &pathItem{childPage, index}
 
 		if childPage.Type() == Leaf {
 			// found leaf page, search end

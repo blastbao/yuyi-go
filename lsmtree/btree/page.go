@@ -34,13 +34,13 @@ const (
 
 	VersionSize     = 1
 	TypeSize        = 1
-	KeyCountSize    = 2
-	KeyOffsetSize   = 4
+	KVCountSize     = 2
+	KVOffsetSize    = 4
 	ValueOffsetSize = 4
 
 	TypeOffset    = VersionSize
 	KVCountOffset = VersionSize + TypeSize
-	KeyOffset     = VersionSize + TypeSize + KeyCountSize
+	KeyOffset     = VersionSize + TypeSize + KVCountSize
 )
 
 // page the basic unit for a btree.
@@ -50,16 +50,16 @@ type page struct {
 	addr    address
 }
 
-func createPage(pageType PageType) *page {
+func NewPage(pageType PageType, pairs []*memtable.KVPair) *page {
 	return &page{
 		content: createEmptyContent(pageType),
-		entries: make([]*memtable.KVPair, 0),
-		addr:    createFakeAddr(),
+		entries: pairs,
+		addr:    newFakeAddr(),
 	}
 }
 
 func createEmptyContent(pageType PageType) []byte {
-	var array [VersionSize + TypeSize + KeyCountSize]byte
+	var array [VersionSize + TypeSize + KVCountSize]byte
 	array[0] = Version1
 	array[1] = byte(pageType)
 	return array[0:]
@@ -84,7 +84,8 @@ func (page *page) KVPairsCount() int {
 	if page.entries != nil {
 		return len(page.entries)
 	}
-	return int(shared.ReadInt16(page.content, KVCountOffset))
+	return int(shared.ReadInt16(
+		bytes.NewBuffer(page.content[KVCountOffset : KVCountOffset+KVCountSize : KVCountOffset+KVCountSize])))
 }
 
 // Search find the location with the specified key.
@@ -114,11 +115,13 @@ func (page *page) Key(index int) memtable.Key {
 	}
 	var start int
 	if index == 0 {
-		start = KeyOffset
+		start = KeyOffset + page.KVPairsCount()*KVOffsetSize*2
 	} else {
-		start = shared.ReadInt(page.content, KeyOffset+int(index-1)*KeyOffsetSize)
+		offset := KeyOffset + (index-1)*KVOffsetSize
+		start = int(shared.ReadInt32(bytes.NewBuffer(page.content[offset : offset+KVOffsetSize : offset+KVOffsetSize])))
 	}
-	end := shared.ReadInt(page.content, KeyOffset+int(index)*KeyOffsetSize)
+	offset := KeyOffset + index*KVOffsetSize
+	end := int(shared.ReadInt32(bytes.NewBuffer(page.content[offset : offset+KVOffsetSize : offset+KVOffsetSize])))
 	return page.content[start:end:end]
 }
 
@@ -128,21 +131,24 @@ func (page *page) Value(index int) memtable.Value {
 		return page.entries[index].Value
 	}
 	kvCount := page.KVPairsCount()
-	valueOffset := KeyOffset + kvCount*KeyOffsetSize
+	valueOffset := KeyOffset + kvCount*KVOffsetSize
 	var start int
 	if index == 0 {
-		start = KeyOffset + kvCount*KeyOffsetSize
+		offset := KeyOffset + (kvCount-1)*KVOffsetSize
+		start = int(shared.ReadInt32(bytes.NewBuffer(page.content[offset : offset+KVOffsetSize : offset+KVOffsetSize])))
 	} else {
-		start = shared.ReadInt(page.content, valueOffset+(index-1)*KeyOffsetSize)
+		offset := valueOffset + (index-1)*KVOffsetSize
+		start = int(shared.ReadInt32(bytes.NewBuffer(page.content[offset : offset+KVOffsetSize : offset+KVOffsetSize])))
 	}
-	end := shared.ReadInt(page.content, valueOffset+index*KeyOffsetSize)
+	offset := valueOffset + index*KVOffsetSize
+	end := int(shared.ReadInt32(bytes.NewBuffer(page.content[offset : offset+KVOffsetSize : offset+KVOffsetSize])))
 	return page.content[start:end:end]
 }
 
 // address get the child page address in the page with the specified index
 func (page *page) ChildAddress(index int) address {
 	value := page.Value(index)
-	return CreateAddress(value)
+	return newAddress(value)
 }
 
 // KVPair get key/value pair in the page with the specified index
@@ -167,10 +173,11 @@ func (page *page) CeilingEntry(key *memtable.Key) *memtable.KVPair {
 func (page *page) AllEntries() []*memtable.KVPair {
 	if page.entries == nil {
 		kvCount := page.KVPairsCount()
-		page.entries = make([]*memtable.KVPair, kvCount)
-		for i := int(0); i < kvCount; i++ {
-			page.entries[i] = &memtable.KVPair{Key: page.Key(i), Value: page.Value(i)}
+		slice := make([]*memtable.KVPair, kvCount)
+		for i := 0; i < kvCount; i++ {
+			slice[i] = &memtable.KVPair{Key: page.Key(i), Value: page.Value(i)}
 		}
+		page.entries = slice
 	}
 	return page.entries
 }
@@ -250,18 +257,20 @@ func (page *pageForDump) buildCompressedBytes() []byte {
 	// calculate capacity of the content
 	kvCount := page.KVPairsCount()
 
-	keyOffset := VersionSize + TypeSize*kvCount*(KeyOffsetSize+ValueOffsetSize)
+	keyOffset := VersionSize + TypeSize + KVCountSize + kvCount*(KVOffsetSize+ValueOffsetSize)
 	capacity := keyOffset
 	valueOffset := keyOffset
 	for _, entry := range page.AllEntries() {
 		capacity += len(entry.Key) + len(entry.Value)
 		valueOffset += len(entry.Key)
 	}
-	res := make([]byte, capacity)
+	res := make([]byte, 0, capacity)
 	buffer := bytes.NewBuffer(res)
 
 	shared.WriteByte(buffer, Version1)
 	shared.WriteByte(buffer, byte(page.Type()))
+	// write kv count
+	shared.WriteInt16(buffer, int16(kvCount))
 	// write key offset
 	for _, entry := range page.AllEntries() {
 		shared.WriteInt32(buffer, int32(keyOffset+len(entry.Key)))
@@ -274,11 +283,11 @@ func (page *pageForDump) buildCompressedBytes() []byte {
 	}
 	// write key content
 	for _, entry := range page.AllEntries() {
-		buffer.Write(entry.Key)
+		shared.WriteBytes(buffer, entry.Key)
 	}
 	// write value content
 	for _, entry := range page.AllEntries() {
-		buffer.Write(entry.Value)
+		shared.WriteBytes(buffer, entry.Value)
 	}
-	return res
+	return buffer.Bytes()
 }

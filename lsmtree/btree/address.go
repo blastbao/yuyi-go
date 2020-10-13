@@ -42,9 +42,9 @@ type address struct {
 	Length int
 }
 
-// createFakeAddr fake address have empty file and negative offset, which is used
+// newFakeAddr fake address have empty file and negative offset, which is used
 // to present address only in memory.
-func createFakeAddr() address {
+func newFakeAddr() address {
 	atomic.AddInt32(&counter, 1)
 	return address{
 		File:   fakeFile,
@@ -65,11 +65,15 @@ func (addr *address) ToValue() memtable.Value {
 	return buffer.Bytes()
 }
 
-func CreateAddress(input []byte) address {
+func (addr *address) equals(addr2 address) bool {
+	return addr.File == addr2.File && addr.Offset == addr2.Offset && addr.Length == addr2.Length
+}
+
+func newAddress(input []byte) address {
 	buffer := bytes.NewBuffer(input[0 : FileNameLength+OffsetSize+LengthSize : FileNameLength+OffsetSize+LengthSize])
 	return address{
-		File:   buffer.String(),
-		Offset: shared.ReadInt(input, FileNameLength),
-		Length: shared.ReadInt(input, FileNameLength+OffsetSize),
+		File:   shared.ReadString(buffer, FileNameLength),
+		Offset: int(shared.ReadInt32(buffer)),
+		Length: int(shared.ReadInt32(buffer)),
 	}
 }

@@ -14,6 +14,8 @@
 
 package memtable
 
+import "bytes"
+
 type OPERATION uint8
 
 const (
@@ -43,5 +45,5 @@ type KVEntry struct {
 }
 
 func (key Key) Compare(another Key) int {
-	return 0
+	return bytes.Compare(key, another)
 }

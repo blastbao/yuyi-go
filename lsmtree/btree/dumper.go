@@ -43,15 +43,22 @@ type dumper struct {
 
 func (dumper *dumper) Dump(tables []*memtable.MemTable) *TreeInfo {
 	entries := toSlice(tables)
-	go dumper.internalDump(entries)
-	return nil
+	c := make(chan TreeInfo, 1)
+	go dumper.internalDump(entries, c)
+	res := <-c
+	return &res
 }
 
 func toSlice(tables []*memtable.MemTable) []*memtable.KVEntry {
 	return nil
 }
 
-func (dumper *dumper) internalDump(entries []*memtable.KVEntry) {
+func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo) {
+	var treeInfo TreeInfo
+	defer func() {
+		c <- treeInfo
+	}()
+
 	ctx := &context{
 		path:      nil,
 		committed: map[int]map[address][]*pageForDump{},
@@ -76,6 +83,53 @@ func (dumper *dumper) internalDump(entries []*memtable.KVEntry) {
 		dumper.checkForCommit(ctx, nil)
 	}
 	dumper.flush(ctx)
+
+	// handle root split and sync
+	treeInfo = *dumper.sync(ctx)
+}
+
+func (dumper *dumper) sync(ctx *context) *TreeInfo {
+	for {
+		if dumper.root.size > dumper.indexPageSize {
+			splitPoints := dumper.calculateSplitPoints(dumper.root)
+			if len(splitPoints) > 1 {
+				dumper.decommissionPage(dumper.root)
+				newRoot := &pageForDump{
+					page:      *NewPage(Root, nil),
+					dirty:     false,
+					valid:     true,
+					size:      0,
+					shadowKey: nil,
+				}
+
+				startPoint := 0
+				for _, splitPoint := range splitPoints {
+					newPage := dumper.splitPage(dumper.root, Index, startPoint, splitPoint)
+					// add new page's reference in root
+					newRoot.addKVPair(&memtable.KVPair{
+						Key:   newPage.Key(0),
+						Value: newPage.addr.ToValue(),
+					})
+					// commit this page for writing
+					ctx.commitPage(newPage, newRoot.addr, 0)
+					startPoint = splitPoint
+				}
+				dumper.root = newRoot
+				dumper.treeDepth++
+				dumper.flush(ctx)
+			}
+		} else {
+			break
+		}
+	}
+
+	// flush root
+	dumper.root.addr = dumper.writePage(dumper.root)
+
+	return &TreeInfo{
+		root:   readPage(dumper.root.addr),
+		filter: &dummyFilter{},
+	}
 }
 
 func (dumper *dumper) putEntries(putEntries []*memtable.KVEntry, ctx *context) {
@@ -129,31 +183,32 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 
 		// create empty leaf
 		leaf := pageForDump{
-			page:      *createPage(Leaf),
+			page:      *NewPage(Leaf, nil),
 			dirty:     true,
 			valid:     false,
 			size:      0,
 			shadowKey: *key,
 		}
-		res[1] = &pathItemForDump{leaf, -1}
+		res[1] = &pathItemForDump{&leaf, 0}
 		dumper.cache[leaf.addr] = &leaf
 		// create new root with leaf reference in root
 		root := pageForDump{
-			page:      *createPage(Root),
+			page:      *NewPage(Root, nil),
 			dirty:     true,
-			valid:     false,
+			valid:     true,
 			size:      0,
 			shadowKey: nil,
 		}
 		root.addKVToIndex(*key, leaf.addr.ToValue(), -1)
-		res[0] = &pathItemForDump{root, 0}
+		res[0] = &pathItemForDump{&root, 0}
+		dumper.cache[root.addr] = &root
 
 		dumper.root = &root
 		dumper.treeDepth = 2
 		return res
 	}
-	path := make([]*pathItem, dumper.treeDepth, dumper.treeDepth)
-	path[0] = &pathItem{root.page, 0}
+	res := make([]*pathItemForDump, dumper.treeDepth, dumper.treeDepth)
+	res[0] = &pathItemForDump{root, 0}
 
 	parent := root
 	depth := 1
@@ -164,28 +219,34 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 		}
 		// find child page with the found index and push it in result.
 		childAddr := parent.ChildAddress(index)
-		var childPage page
+		var childPage *pageForDump
 		if dumper.cache[childAddr] != nil {
-			childPage = dumper.cache[childAddr].page
+			childPage = dumper.cache[childAddr]
 		} else {
-			childPage = *readPage(childAddr)
+			page := *readPage(childAddr)
+			childPage = &pageForDump{
+				page:      page,
+				dirty:     false,
+				valid:     true,
+				size:      len(page.content),
+				shadowKey: nil,
+			}
+			dumper.cache[childAddr] = childPage
 		}
-		path[depth] = &pathItem{childPage, index}
+		res[depth] = &pathItemForDump{
+			page:  childPage,
+			index: index,
+		}
 
 		if childPage.Type() == Leaf {
 			// found leaf page, search end
 			break
+		} else {
+			parent = childPage
+			depth++
 		}
 	}
-
-	pathForDump := make([]*pathItemForDump, len(path))
-	for i, item := range path {
-		pathForDump[i] = &pathItemForDump{page: pageForDump{page: item.page, dirty: false}, index: item.index}
-
-		// cache pages in dumper cache
-		dumper.cache[item.page.addr] = &pathForDump[i].page
-	}
-	return pathForDump
+	return res
 }
 
 func (dumper *dumper) fetchPageForDumper(addr address) *pageForDump {
@@ -226,7 +287,7 @@ func (dumper *dumper) checkForCommit(ctx *context, newPath []*pathItemForDump) {
 		pathItem := path[i]
 		if pathItem.page.size > dumper.leafPageSize {
 			// page size over threshold. Try to split this page
-			splitPoints := dumper.calculateSplitPoints(&pathItem.page)
+			splitPoints := dumper.calculateSplitPoints(pathItem.page)
 			if len(splitPoints) == 0 || len(splitPoints) == 1 {
 				return
 			}
@@ -236,12 +297,12 @@ func (dumper *dumper) checkForCommit(ctx *context, newPath []*pathItemForDump) {
 			}
 
 			// split current page, decommission current page
-			dumper.decommissionPage(&pathItem.page)
+			dumper.decommissionPage(pathItem.page)
 
 			// create new pages based on the splitPoint
 			startPoint := 0
-			for splitPoint := range splitPoints {
-				newPage := dumper.splitPage(&pathItem.page, startPoint, splitPoint)
+			for _, splitPoint := range splitPoints {
+				newPage := dumper.splitPage(pathItem.page, pathItem.page.Type(), startPoint, splitPoint)
 				// add new page's reference in it's parent
 				path[i-1].page.addKVPair(&memtable.KVPair{
 					Key:   newPage.Key(0),
@@ -256,7 +317,7 @@ func (dumper *dumper) checkForCommit(ctx *context, newPath []*pathItemForDump) {
 			// page size under threshold. Try to merge this page with it's right page
 		} else {
 			// commit this page for writing
-			ctx.commitPage(&pathItem.page, path[i-1].page.addr, i)
+			ctx.commitPage(pathItem.page, path[i-1].page.addr, i)
 		}
 	}
 }
@@ -267,13 +328,64 @@ func (dumper *dumper) decommissionPage(page *pageForDump) {
 }
 
 func (dumper *dumper) calculateSplitPoints(page *pageForDump) []int {
-	return nil
+	// get pages' size after split based on page type
+	var pageSize int
+	if page.Type() == Leaf {
+		pageSize = dumper.leafPageSize
+	} else {
+		pageSize = dumper.indexPageSize
+	}
+
+	limit := pageSize
+	if page.size < 2*pageSize {
+		limit = page.size / 2
+	}
+
+	res := make([]int, 0)
+	cur := 0
+	curSize := 0
+	total := 0
+	for i, pair := range page.entries {
+		size := len(pair.Key) + len(pair.Value)
+		total += size
+
+		if curSize+size > limit {
+			if cur == i {
+				res = append(res, i+1)
+				cur = i + 1
+				curSize = 0
+			} else {
+				res = append(res, i)
+				cur = i
+				curSize = size
+			}
+			if page.size-total < pageSize {
+				break
+			} else if page.size-total > pageSize && page.size-total < 2*pageSize {
+				limit = (page.size - total) / 2
+			}
+		} else {
+			curSize += size
+		}
+	}
+	res = append(res, len(page.entries))
+	return res
 }
 
-func (dumper *dumper) splitPage(page *pageForDump, start int, end int) *pageForDump {
-	//dumper.cache[newPage.address] = newPage
-	// Todo: add the created page in write cache
-	return nil
+func (dumper *dumper) splitPage(page *pageForDump, pageType PageType, start int, end int) *pageForDump {
+	var size int
+	for i := start; i < end; i++ {
+		size += len(page.entries[i].Key) + len(page.entries[i].Value)
+	}
+	page = &pageForDump{
+		page:      *NewPage(pageType, page.entries[start:end:end]),
+		dirty:     true,
+		valid:     false,
+		size:      size,
+		shadowKey: nil,
+	}
+	dumper.cache[page.addr] = page
+	return page
 }
 
 func (dumper *dumper) checkForMerge(path []*pathItemForDump) []*pathItemForDump {
@@ -282,10 +394,13 @@ func (dumper *dumper) checkForMerge(path []*pathItemForDump) []*pathItemForDump 
 
 func (dumper *dumper) flush(ctx *context) {
 	// flush writable page from bottom to up, leaf to index
-	depth := len(ctx.committed)
-	for level := depth - 1; level >= 0; level++ {
+	depth := dumper.treeDepth
+	for level := depth - 1; level >= 0; level-- {
 		for parentAddr, pages := range ctx.committed[level] {
 			parent := dumper.cache[parentAddr]
+			if parent == nil && parentAddr.equals(dumper.root.addr) {
+				parent = dumper.root
+			}
 			for i, addr := range dumper.writePages(pages) {
 				page := pages[i]
 				if page.shadowKey != nil {
@@ -294,15 +409,21 @@ func (dumper *dumper) flush(ctx *context) {
 					page.shadowKey = nil
 				}
 				parent.addKV(page.mappingKey(), addr.ToValue())
+
 				dumper.decommissionPage(page)
 			}
+			ctx.committed[level][parentAddr] = nil
 		}
 	}
 	return
 }
 
+func (dumper *dumper) writePage(page *pageForDump) address {
+	return writeTo(page.buildCompressedBytes())
+}
+
 func (dumper *dumper) writePages(pages []*pageForDump) []address {
-	addresses := make([]address, len(pages))
+	addresses := make([]address, 0)
 	for _, page := range pages {
 		addresses = append(addresses, writeTo(page.buildCompressedBytes()))
 	}
@@ -321,7 +442,7 @@ type context struct {
 func (ctx *context) commitPage(page *pageForDump, parentAddr address, level int) {
 	committedOnLevel := ctx.committedOnLevel(level)
 	if committedOnLevel[parentAddr] == nil {
-		committedOnLevel[parentAddr] = make([]*pageForDump, 10)
+		committedOnLevel[parentAddr] = make([]*pageForDump, 0)
 	}
 	committedOnLevel[parentAddr] = append(committedOnLevel[parentAddr], page)
 }
