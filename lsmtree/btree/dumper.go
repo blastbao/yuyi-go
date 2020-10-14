@@ -15,6 +15,7 @@
 package btree
 
 import (
+	"fmt"
 	"yuyi-go/lsmtree/memtable"
 )
 
@@ -93,7 +94,9 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 		if dumper.root.size > dumper.indexPageSize {
 			splitPoints := dumper.calculateSplitPoints(dumper.root)
 			if len(splitPoints) > 1 {
+				oldRoot := dumper.root
 				dumper.decommissionPage(dumper.root)
+
 				newRoot := &pageForDump{
 					page:      *NewPage(Root, nil),
 					dirty:     false,
@@ -101,10 +104,11 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 					size:      0,
 					shadowKey: nil,
 				}
+				dumper.root = newRoot
 
 				startPoint := 0
 				for _, splitPoint := range splitPoints {
-					newPage := dumper.splitPage(dumper.root, Index, startPoint, splitPoint)
+					newPage := dumper.splitPage(oldRoot, Index, startPoint, splitPoint)
 					// add new page's reference in root
 					newRoot.addKVPair(&memtable.KVPair{
 						Key:   newPage.Key(0),
@@ -114,7 +118,6 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 					ctx.commitPage(newPage, newRoot.addr, 0)
 					startPoint = splitPoint
 				}
-				dumper.root = newRoot
 				dumper.treeDepth++
 				dumper.flush(ctx)
 			}
@@ -324,6 +327,9 @@ func (dumper *dumper) checkForCommit(ctx *context, newPath []*pathItemForDump) {
 
 func (dumper *dumper) decommissionPage(page *pageForDump) {
 	page.valid = false
+	if page.Type() == Index {
+		fmt.Println()
+	}
 	dumper.cache[page.addr] = nil
 }
 
@@ -400,6 +406,9 @@ func (dumper *dumper) flush(ctx *context) {
 			parent := dumper.cache[parentAddr]
 			if parent == nil && parentAddr.equals(dumper.root.addr) {
 				parent = dumper.root
+			}
+			if parent == nil && pages != nil {
+				fmt.Println("")
 			}
 			for i, addr := range dumper.writePages(pages) {
 				page := pages[i]
