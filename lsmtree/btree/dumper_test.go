@@ -29,8 +29,7 @@ func TestDumper(t *testing.T) {
 
 	for i := 0; i < 10; i++ {
 		entries := randomPutKVEntries(entriesCount)
-		c := make(chan TreeInfo, 1)
-		dumper.internalDump(entries, c)
+		dumper.Dump(entries)
 	}
 }
 

@@ -15,7 +15,6 @@
 package btree
 
 import (
-	"fmt"
 	"yuyi-go/lsmtree/memtable"
 )
 
@@ -42,16 +41,11 @@ type dumper struct {
 	indexPageSize int
 }
 
-func (dumper *dumper) Dump(tables []*memtable.MemTable) *TreeInfo {
-	entries := toSlice(tables)
+func (dumper *dumper) Dump(entries []*memtable.KVEntry) *TreeInfo {
 	c := make(chan TreeInfo, 1)
 	go dumper.internalDump(entries, c)
 	res := <-c
 	return &res
-}
-
-func toSlice(tables []*memtable.MemTable) []*memtable.KVEntry {
-	return nil
 }
 
 func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo) {
@@ -284,7 +278,7 @@ func (dumper *dumper) checkForCommit(ctx *context, newPath []*pathItemForDump) {
 	}
 	for i := len(path) - 1; i > 0; i-- {
 		// check if page is committable
-		if newPath != nil && &path[i].page == &newPath[i].page {
+		if newPath != nil && path[i].page == newPath[i].page {
 			break
 		}
 		pathItem := path[i]
@@ -327,9 +321,6 @@ func (dumper *dumper) checkForCommit(ctx *context, newPath []*pathItemForDump) {
 
 func (dumper *dumper) decommissionPage(page *pageForDump) {
 	page.valid = false
-	if page.Type() == Index {
-		fmt.Println()
-	}
 	dumper.cache[page.addr] = nil
 }
 
@@ -406,9 +397,6 @@ func (dumper *dumper) flush(ctx *context) {
 			parent := dumper.cache[parentAddr]
 			if parent == nil && parentAddr.equals(dumper.root.addr) {
 				parent = dumper.root
-			}
-			if parent == nil && pages != nil {
-				fmt.Println("")
 			}
 			for i, addr := range dumper.writePages(pages) {
 				page := pages[i]
