@@ -219,6 +219,7 @@ func (page *pageForDump) addKVToIndex(key memtable.Key, value memtable.Value, in
 	}
 	// update entries of the page
 	page.entries = entries
+	page.dirty = true
 }
 
 func (page *pageForDump) mappingKey() memtable.Key {
@@ -248,6 +249,7 @@ func (page *pageForDump) removeKVEntry(index int) {
 	leftPart := entries[0:index:index]
 	right := entries[index+1 : len(entries) : len(entries)]
 	page.entries = append(leftPart, right...)
+	page.dirty = true
 }
 
 func (page *pageForDump) buildCompressedBytes() []byte {

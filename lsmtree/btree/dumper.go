@@ -125,6 +125,7 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 
 	return &TreeInfo{
 		root:   readPage(dumper.root.addr),
+		depth:  dumper.treeDepth,
 		filter: &dummyFilter{},
 	}
 }
@@ -212,7 +213,11 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 	for {
 		index := parent.Search(key)
 		if index < 0 {
-			index = -index - 2
+			if index == -1 {
+				index = 0
+			} else {
+				index = -index - 2
+			}
 		}
 		// find child page with the found index and push it in result.
 		childAddr := parent.ChildAddress(index)
@@ -394,9 +399,11 @@ func (dumper *dumper) flush(ctx *context) {
 	depth := dumper.treeDepth
 	for level := depth - 1; level >= 0; level-- {
 		for parentAddr, pages := range ctx.committed[level] {
-			parent := dumper.cache[parentAddr]
-			if parent == nil && parentAddr.equals(dumper.root.addr) {
+			var parent *pageForDump
+			if parentAddr.equals(dumper.root.addr) {
 				parent = dumper.root
+			} else {
+				parent = dumper.cache[parentAddr]
 			}
 			for i, addr := range dumper.writePages(pages) {
 				page := pages[i]

@@ -25,21 +25,46 @@ import (
 var entriesCount = 2000
 
 func TestDumper(t *testing.T) {
-	dumper := buildDumperInstance()
-
+	btree := &BTree{}
+	allEntries := make([]*memtable.KVEntry, 0)
 	for i := 0; i < 10; i++ {
 		entries := randomPutKVEntries(entriesCount)
-		dumper.Dump(entries)
+		allEntries = append(allEntries, entries...)
+
+		dumper := buildDumperInstance(btree)
+		btree.lastTreeInfo = dumper.Dump(entries)
 	}
 }
 
-func buildDumperInstance() *dumper {
-	btree := BTree{}
+func buildDumperInstance(btree *BTree) *dumper {
+	var root pageForDump
+	var depth int
+	if btree.lastTreeInfo != nil && btree.lastTreeInfo.root != nil {
+		page := btree.lastTreeInfo.root
+		root = pageForDump{
+			page:      *page,
+			dirty:     false,
+			valid:     true,
+			size:      len(page.content),
+			shadowKey: nil,
+		}
+		depth = btree.lastTreeInfo.depth
+		return &dumper{
+			btree:         btree,
+			root:          &root,
+			filter:        &dummyFilter{},
+			cache:         map[address]*pageForDump{},
+			treeDepth:     depth,
+			leafPageSize:  8192,
+			indexPageSize: 8192,
+		}
+	}
 	return &dumper{
-		btree:         &btree,
+		btree:         btree,
 		root:          nil,
 		filter:        &dummyFilter{},
 		cache:         map[address]*pageForDump{},
+		treeDepth:     0,
 		leafPageSize:  8192,
 		indexPageSize: 8192,
 	}

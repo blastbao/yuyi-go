@@ -18,21 +18,17 @@ import (
 	"yuyi-go/lsmtree/memtable"
 )
 
-var treeDepth int8
-
-func init() {
-	// find path from root to leaf with empty key to determine current tree depth
-	treeDepth = 0
-}
-
 type BTree struct {
 	// lastTreeInfo last tree info after Cow synced from memory table.
-	lastTreeInfo TreeInfo
+	lastTreeInfo *TreeInfo
 }
 
 type TreeInfo struct {
 	// root the root page of the copy-on-write b+ tree.
 	root *page
+
+	// depth the depth of the tree
+	depth int
 
 	// filter the filter for quick filter key
 	filter Filter
@@ -50,26 +46,26 @@ type pathItemForDump struct {
 
 func (tree *BTree) Has(key *memtable.Key) bool {
 	treeInfo := tree.lastTreeInfo
-	skipRead := !mightContains(&treeInfo, key)
+	skipRead := !mightContains(treeInfo, key)
 	if skipRead {
 		return false
 	}
 
 	// fetch the path with the specified key
-	path := tree.FindPathToLeaf(treeInfo.root, key)
+	path := tree.findPath(treeInfo.root, key)
 	leaf := path[len(path)-1].page
 	return leaf.Search(key) >= 0
 }
 
 func (tree *BTree) Get(key *memtable.Key) memtable.Value {
 	treeInfo := tree.lastTreeInfo
-	skipRead := !mightContains(&treeInfo, key)
+	skipRead := !mightContains(treeInfo, key)
 	if skipRead {
 		return nil
 	}
 
 	// fetch the path with the specified key
-	path := tree.FindPathToLeaf(treeInfo.root, key)
+	path := tree.findPath(treeInfo.root, key)
 
 	leaf := path[len(path)-1].page
 	index := leaf.Search(key)
@@ -80,26 +76,73 @@ func (tree *BTree) Get(key *memtable.Key) memtable.Value {
 	}
 }
 
-func (tree *BTree) List(start memtable.Key, end memtable.Key, max uint16) []memtable.Value {
+type ListResult struct {
+	pairs []*memtable.KVPair
+	next  *memtable.Key
+}
+
+func (tree *BTree) List(start memtable.Key, end memtable.Key, max int) *ListResult {
+	res := make([]*memtable.KVPair, 0, max)
+	if start == nil {
+		start = []byte{}
+	}
+
+	path := tree.findPath(tree.lastTreeInfo.root, &start)
+	leaf := path[len(path)-1].page
+	pairsCount := leaf.KVPairsCount()
+	if pairsCount == 0 {
+		return &ListResult{make([]*memtable.KVPair, 0), nil}
+	}
+
+	startIndex := leaf.Search(&start)
+	if startIndex < 0 {
+		startIndex = -startIndex - 1
+	}
+
+	keyFound := 0
+	var next memtable.Key
+outer:
+	for {
+		for i := startIndex; i < pairsCount; i++ {
+			if end != nil && leaf.Key(i).Compare(end) >= 0 {
+				break outer
+			}
+			if keyFound == max {
+				// search for kv pairs finished, found next key
+				next = leaf.Key(i)
+				break outer
+			}
+			res = append(res, leaf.KVPair(i))
+		}
+		// try find next leaf page
+		path = tree.findNextLeaf(path)
+		if path == nil {
+			// reach end of the tree
+			break
+		}
+		leaf = path[len(path)-1].page
+		pairsCount = leaf.KVPairsCount()
+		startIndex = 0
+	}
+	return &ListResult{res, &next}
+}
+
+func (tree *BTree) ReverseList(start memtable.Key, end memtable.Key, max int) []memtable.KVPair {
 	return nil
 }
 
-func (tree *BTree) ReverseList(start memtable.Key, end memtable.Key, max uint16) []memtable.Value {
+func (tree *BTree) ListOnPrefix(prefix memtable.Key, start memtable.Key, end memtable.Key, max int) []*memtable.KVPair {
 	return nil
 }
 
-func (tree *BTree) ListOnPrefix(prefix memtable.Key, start memtable.Key, end memtable.Key, max uint16) []*memtable.Value {
+func (tree *BTree) ReverseListOnPrefix(prefix memtable.Key, max int) []*memtable.KVPair {
 	return nil
 }
 
-func (tree *BTree) ReverseListOnPrefix(prefix memtable.Key, max uint16) []*memtable.Value {
-	return nil
-}
-
-// FindPathToLeaf find the path from root page to leaf page with the specified key
-func (tree *BTree) FindPathToLeaf(root *page, key *memtable.Key) []*pathItem {
+// findPath find the path from root page to leaf page with the specified key
+func (tree *BTree) findPath(root *page, key *memtable.Key) []*pathItem {
 	// create result slice and put root to the result
-	res := make([]*pathItem, treeDepth, treeDepth)
+	res := make([]*pathItem, 0)
 	res[0] = &pathItem{root, 0}
 
 	parent := root
@@ -107,7 +150,11 @@ func (tree *BTree) FindPathToLeaf(root *page, key *memtable.Key) []*pathItem {
 	for {
 		index := parent.Search(key)
 		if index < 0 {
-			index = -index - 1
+			if index == -1 {
+				index = 0
+			} else {
+				index = -index - 2
+			}
 		}
 		// find child page with the found index and push it in result.
 		childAddress := parent.ChildAddress(index)
@@ -120,6 +167,36 @@ func (tree *BTree) FindPathToLeaf(root *page, key *memtable.Key) []*pathItem {
 		}
 	}
 	return res
+}
+
+func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
+	depth := len(curPath)
+	// recusive find next index
+	i := depth - 1
+	for ; i > 0; i++ {
+		if curPath[i].index+1 < curPath[i-1].page.KVPairsCount() {
+			nextLeaf := readPage(curPath[i-1].page.ChildAddress(curPath[i-1].index + 1))
+			curPath[i] = &pathItem{nextLeaf, curPath[i].index + 1}
+			break
+		} else {
+			curPath[i] = nil
+		}
+	}
+	if curPath[1] == nil {
+		// reach end of the tree
+		return nil
+	}
+	for {
+		if curPath[i].page.Type() == Leaf {
+			break
+		}
+		// find child page with the found index and push it in result.
+		childAddress := curPath[i].page.ChildAddress(0)
+		childPage := readPage(childAddress)
+		curPath[i+1] = &pathItem{childPage, 0}
+		i++
+	}
+	return curPath
 }
 
 func mightContains(treeInfo *TreeInfo, key *memtable.Key) bool {
