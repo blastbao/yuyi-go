@@ -30,9 +30,29 @@ func TestDumper(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = append(allEntries, entries...)
+		sort.Slice(allEntries, func(i, j int) bool {
+			return bytes.Compare(allEntries[i].Key, allEntries[j].Key) <= 0
+		})
 
 		dumper := buildDumperInstance(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
+
+		index := 0
+		// do list
+		var start memtable.Key
+		for {
+			listRes := btree.List(start, nil, 1000)
+			for _, pair := range listRes.pairs {
+				if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
+					t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
+				}
+				index++
+			}
+			start = *listRes.next
+			if start == nil {
+				break
+			}
+		}
 	}
 }
 

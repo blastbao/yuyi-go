@@ -52,7 +52,7 @@ func (tree *BTree) Has(key *memtable.Key) bool {
 	}
 
 	// fetch the path with the specified key
-	path := tree.findPath(treeInfo.root, key)
+	path := tree.findPath(treeInfo, key)
 	leaf := path[len(path)-1].page
 	return leaf.Search(key) >= 0
 }
@@ -65,7 +65,7 @@ func (tree *BTree) Get(key *memtable.Key) memtable.Value {
 	}
 
 	// fetch the path with the specified key
-	path := tree.findPath(treeInfo.root, key)
+	path := tree.findPath(treeInfo, key)
 
 	leaf := path[len(path)-1].page
 	index := leaf.Search(key)
@@ -82,12 +82,20 @@ type ListResult struct {
 }
 
 func (tree *BTree) List(start memtable.Key, end memtable.Key, max int) *ListResult {
+	treeInfo := tree.lastTreeInfo
+	if treeInfo == nil || treeInfo.root == nil {
+		return &ListResult{
+			pairs: []*memtable.KVPair{},
+			next:  nil,
+		}
+	}
+
 	res := make([]*memtable.KVPair, 0, max)
 	if start == nil {
 		start = []byte{}
 	}
 
-	path := tree.findPath(tree.lastTreeInfo.root, &start)
+	path := tree.findPath(tree.lastTreeInfo, &start)
 	leaf := path[len(path)-1].page
 	pairsCount := leaf.KVPairsCount()
 	if pairsCount == 0 {
@@ -113,6 +121,7 @@ outer:
 				break outer
 			}
 			res = append(res, leaf.KVPair(i))
+			keyFound++
 		}
 		// try find next leaf page
 		path = tree.findNextLeaf(path)
@@ -140,9 +149,10 @@ func (tree *BTree) ReverseListOnPrefix(prefix memtable.Key, max int) []*memtable
 }
 
 // findPath find the path from root page to leaf page with the specified key
-func (tree *BTree) findPath(root *page, key *memtable.Key) []*pathItem {
+func (tree *BTree) findPath(treeInfo *TreeInfo, key *memtable.Key) []*pathItem {
+	root := treeInfo.root
 	// create result slice and put root to the result
-	res := make([]*pathItem, 0)
+	res := make([]*pathItem, treeInfo.depth, treeInfo.depth)
 	res[0] = &pathItem{root, 0}
 
 	parent := root
@@ -164,6 +174,9 @@ func (tree *BTree) findPath(root *page, key *memtable.Key) []*pathItem {
 		if childPage.Type() == Leaf {
 			// found leaf page, search end
 			break
+		} else {
+			parent = childPage
+			depth++
 		}
 	}
 	return res
@@ -173,9 +186,9 @@ func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
 	depth := len(curPath)
 	// recusive find next index
 	i := depth - 1
-	for ; i > 0; i++ {
+	for ; i > 0; i-- {
 		if curPath[i].index+1 < curPath[i-1].page.KVPairsCount() {
-			nextLeaf := readPage(curPath[i-1].page.ChildAddress(curPath[i-1].index + 1))
+			nextLeaf := readPage(curPath[i-1].page.ChildAddress(curPath[i].index + 1))
 			curPath[i] = &pathItem{nextLeaf, curPath[i].index + 1}
 			break
 		} else {
