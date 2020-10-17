@@ -24,16 +24,47 @@ import (
 
 var entriesCount = 2000
 
-func TestDumper(t *testing.T) {
+func TestPutEntries(t *testing.T) {
 	btree := &BTree{}
 	allEntries := make([]*memtable.KVEntry, 0)
+outer:
 	for i := 0; i < 10; i++ {
 		entries := randomPutKVEntries(entriesCount)
-		allEntries = append(allEntries, entries...)
-		sort.Slice(allEntries, func(i, j int) bool {
-			return bytes.Compare(allEntries[i].Key, allEntries[j].Key) <= 0
-		})
+		allEntries = mergeEntries(allEntries, entries)
+		dumper := buildDumperInstance(btree)
+		btree.lastTreeInfo = dumper.Dump(entries)
 
+		index := 0
+		// do list
+		var start memtable.Key
+		for {
+			listRes := btree.List(start, nil, 1000)
+			for _, pair := range listRes.pairs {
+				if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
+					t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
+					break outer
+				}
+				index++
+			}
+			start = *listRes.next
+			if start == nil {
+				break
+			}
+		}
+	}
+}
+
+func TestPutAndRemoveEntries(t *testing.T) {
+	btree := &BTree{}
+	allEntries := make([]*memtable.KVEntry, 0)
+
+	// init with 2000 put entries
+	entries := randomPutKVEntries(entriesCount)
+	dumper := buildDumperInstance(btree)
+	btree.lastTreeInfo = dumper.Dump(entries)
+
+	for i := 0; i < 10; i++ {
+		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		dumper := buildDumperInstance(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
 
@@ -110,6 +141,59 @@ func randomPutKVEntries(count int) []*memtable.KVEntry {
 		return bytes.Compare(res[i].Key, res[j].Key) <= 0
 	})
 	return res
+}
+
+func randomPutAndRemoveKVEntries(entries []*memtable.KVEntry, count int, removePer int) []*memtable.KVEntry {
+	res := make([]*memtable.KVEntry, 0)
+
+	for i := 0; i < count; i++ {
+		key := randomBytes(keyLen, defaultLetters)
+		value := randomBytes(valueLen, defaultLetters)
+		res[i] = &memtable.KVEntry{
+			Key: key,
+			TableValue: memtable.TableValue{
+				Operation: memtable.Put,
+				Value:     value,
+			},
+		}
+	}
+	sort.Slice(res, func(i, j int) bool {
+		return bytes.Compare(res[i].Key, res[j].Key) <= 0
+	})
+	return res
+}
+
+func mergeEntries(allEntries []*memtable.KVEntry, newEntries []*memtable.KVEntry) []*memtable.KVEntry {
+	mergedEntries := make([]*memtable.KVEntry, 0)
+
+	i := 0
+	j := 0
+	for {
+		if i >= len(allEntries) || j >= len(newEntries) {
+			break
+		}
+		res := allEntries[i].Key.Compare(newEntries[j].Key)
+		if res == 0 {
+			if newEntries[i].TableValue.Operation != memtable.Remove {
+				mergedEntries = append(mergedEntries, newEntries[j])
+			}
+			i++
+			j++
+		} else if res > 0 {
+			mergedEntries = append(mergedEntries, newEntries[j])
+			j++
+		} else {
+			mergedEntries = append(mergedEntries, allEntries[i])
+			i++
+		}
+	}
+	if i < len(allEntries) {
+		mergedEntries = append(mergedEntries, allEntries[i:len(allEntries)]...)
+	}
+	if j < len(newEntries) {
+		mergedEntries = append(mergedEntries, newEntries[j:len(newEntries)]...)
+	}
+	return mergedEntries
 }
 
 var defaultLetters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")

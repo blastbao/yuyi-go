@@ -199,6 +199,30 @@ type pageForDump struct {
 	shadowKey memtable.Key
 }
 
+func NewPageForDump(pageType PageType, pairs []*memtable.KVPair) *pageForDump {
+	page := page{
+		content: createEmptyContent(pageType),
+		entries: pairs,
+		addr:    newFakeAddr(),
+	}
+	return &pageForDump{
+		page:      page,
+		dirty:     true,
+		valid:     true,
+		size:      len(page.content),
+		shadowKey: nil,
+	}
+}
+
+func (page *pageForDump) appendKVEntries(entriesToAppend []*memtable.KVPair) {
+	// update entries of the page
+	for _, pair := range entriesToAppend {
+		page.entries = append(page.AllEntries(), pair)
+		page.size += len(pair.Key) + len(pair.Value)
+	}
+	page.dirty = true
+}
+
 func (page *pageForDump) addKVToIndex(key memtable.Key, value memtable.Value, index int) {
 	entries := page.AllEntries()
 	if index < 0 {
@@ -243,7 +267,14 @@ func (page *pageForDump) addKVEntryToIndex(entry *memtable.KVEntry, index int) {
 	page.addKVToIndex(entry.Key, entry.TableValue.Value, index)
 }
 
-func (page *pageForDump) removeKVEntry(index int) {
+func (page *pageForDump) removeKV(key memtable.Key) {
+	index := page.Search(&key)
+	if index >= 0 {
+		page.removeKVEntryFromIndex(index)
+	}
+}
+
+func (page *pageForDump) removeKVEntryFromIndex(index int) {
 	entries := page.AllEntries()
 
 	leftPart := entries[0:index:index]

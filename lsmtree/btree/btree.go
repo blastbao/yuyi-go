@@ -140,14 +140,6 @@ func (tree *BTree) ReverseList(start memtable.Key, end memtable.Key, max int) []
 	return nil
 }
 
-func (tree *BTree) ListOnPrefix(prefix memtable.Key, start memtable.Key, end memtable.Key, max int) []*memtable.KVPair {
-	return nil
-}
-
-func (tree *BTree) ReverseListOnPrefix(prefix memtable.Key, max int) []*memtable.KVPair {
-	return nil
-}
-
 // findPath find the path from root page to leaf page with the specified key
 func (tree *BTree) findPath(treeInfo *TreeInfo, key *memtable.Key) []*pathItem {
 	root := treeInfo.root
