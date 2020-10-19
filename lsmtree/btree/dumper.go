@@ -66,7 +66,7 @@ func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo)
 		}
 		if entry.TableValue.Operation == memtable.Remove {
 			if i > lastIndex {
-				putEntries := entries[lastIndex : i+1 : i+1]
+				putEntries := entries[lastIndex:i:i]
 				dumper.putEntries(putEntries, ctx)
 			}
 			dumper.removeEntry(entry, ctx)
@@ -76,8 +76,8 @@ func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo)
 	if lastIndex < len(entries) {
 		putEntries := entries[lastIndex:len(entries):len(entries)]
 		dumper.putEntries(putEntries, ctx)
-		dumper.checkForCommit(ctx, nil)
 	}
+	dumper.checkForCommit(ctx, nil)
 	dumper.flush(ctx)
 
 	for _, page := range dumper.cache {
@@ -371,26 +371,26 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 			nextPage := readPage(nextAddr)
 			pathItem.page.appendKVEntries(nextPage.AllEntries())
 			path[level-1].page.removeKVEntryFromIndex(pathItem.index + 1)
+			if newPath != nil && path[level-1].page == newPath[level-1].page {
+				newPath[level].index = newPath[level].index - 1
+			}
 
 			if pathItem.page.size > threshold {
 				dumper.checkForSplit(ctx, level, threshold, newPath)
 			} else {
 				ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
-				if newPath != nil {
-					newPath[level].index = newPath[level].index - 1
-				}
 			}
 		}
+		return
 	} else if pathItem.index > 1 {
 		// can't merge with right page of old path. Try left page
 		prevAddr := path[level-1].page.ChildAddress(pathItem.index - 1)
-		var prevPage *pageForDump
 		if dumper.cache[prevAddr] != nil {
-			// prevPage already in cache, and must already committed
-			prevPage = dumper.cache[prevAddr]
-		} else {
-			prevPage = dumper.fetchPageForDumper(prevAddr)
+			// prevPage already in cache, and must already committed, should not change it.
+			ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
+			return
 		}
+		prevPage := dumper.fetchPageForDumper(prevAddr)
 		prevPage.appendKVEntries(pathItem.page.AllEntries())
 		// remove reference for the merged page
 		if pathItem.page.Type() == Index {
@@ -403,17 +403,13 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 		}
 		path[level-1].page.removeKVEntryFromIndex(pathItem.index)
 		dumper.decommissionPage(pathItem.page)
-		pathItem.page = prevPage
-		pathItem.index = pathItem.index - 1
 
 		if prevPage.size > threshold {
 			dumper.checkForSplit(ctx, level, threshold, newPath)
 		} else {
-			ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
-			if newPath != nil {
-				newPath[level].index = newPath[level].index - 1
-			}
+			ctx.commitPage(prevPage, path[level-1].page.addr, level)
 		}
+		return
 	} else {
 		// commit this page for writing
 		ctx.commitPage(pathItem.page, path[level-1].page.addr, level)

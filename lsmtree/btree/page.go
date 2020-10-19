@@ -281,6 +281,9 @@ func (page *pageForDump) removeKVEntryFromIndex(index int) {
 	if index == 0 && page.shadowKey == nil {
 		page.shadowKey = entries[0].Key
 	}
+	// update size of the page
+	page.size -= len(entries[index].Key) + len(entries[index].Value)
+
 	leftPart := entries[0:index:index]
 	right := entries[index+1 : len(entries) : len(entries)]
 	page.entries = append(leftPart, right...)
