@@ -153,7 +153,7 @@ func randomPutAndRemoveKVEntries(entries []*memtable.KVEntry, count int, removeP
 
 	length := len(entries)
 	for i := 0; i < count; i++ {
-		if removePer < rand.Intn(100) {
+		if rand.Intn(100) < removePer {
 			var key memtable.Key
 			for {
 				deleteIndex := rand.Intn(length)
