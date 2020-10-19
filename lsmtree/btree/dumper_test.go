@@ -28,7 +28,7 @@ func TestPutEntries(t *testing.T) {
 	btree := &BTree{}
 	allEntries := make([]*memtable.KVEntry, 0)
 outer:
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 30; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper := buildDumperInstance(btree)
@@ -60,11 +60,13 @@ func TestPutAndRemoveEntries(t *testing.T) {
 
 	// init with 2000 put entries
 	entries := randomPutKVEntries(entriesCount)
+	allEntries = mergeEntries(allEntries, entries)
 	dumper := buildDumperInstance(btree)
 	btree.lastTreeInfo = dumper.Dump(entries)
 
 	for i := 0; i < 10; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
+		allEntries = mergeEntries(allEntries, entries)
 		dumper := buildDumperInstance(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
 
@@ -144,17 +146,28 @@ func randomPutKVEntries(count int) []*memtable.KVEntry {
 }
 
 func randomPutAndRemoveKVEntries(entries []*memtable.KVEntry, count int, removePer int) []*memtable.KVEntry {
-	res := make([]*memtable.KVEntry, 0)
+	res := make([]*memtable.KVEntry, count)
 
 	for i := 0; i < count; i++ {
-		key := randomBytes(keyLen, defaultLetters)
-		value := randomBytes(valueLen, defaultLetters)
-		res[i] = &memtable.KVEntry{
-			Key: key,
-			TableValue: memtable.TableValue{
-				Operation: memtable.Put,
-				Value:     value,
-			},
+		if removePer < rand.Intn(100) {
+			key := entries[rand.Intn(len(entries))].Key
+			res[i] = &memtable.KVEntry{
+				Key: key,
+				TableValue: memtable.TableValue{
+					Operation: memtable.Remove,
+					Value:     nil,
+				},
+			}
+		} else {
+			key := randomBytes(keyLen, defaultLetters)
+			value := randomBytes(valueLen, defaultLetters)
+			res[i] = &memtable.KVEntry{
+				Key: key,
+				TableValue: memtable.TableValue{
+					Operation: memtable.Put,
+					Value:     value,
+				},
+			}
 		}
 	}
 	sort.Slice(res, func(i, j int) bool {

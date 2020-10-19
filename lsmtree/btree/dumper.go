@@ -163,6 +163,11 @@ func (dumper *dumper) removeEntry(entry *memtable.KVEntry, ctx *context) {
 		return
 	}
 	path := dumper.fetchPathForDumper(dumper.root, &entry.Key)
+	if path != nil {
+		// check with new path to commit pages that is writable
+		dumper.checkForCommit(ctx, path)
+		ctx.path = path
+	}
 
 	leafPage := path[len(path)-1].page
 	index := leafPage.Search(&entry.Key)
@@ -180,7 +185,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 	if root == nil {
 		res := make([]*pathItemForDump, 2, 2)
 
-		// create empty leaf
+		// create empty leaf with the shadow key that first key to insert
 		leaf := pageForDump{
 			page:      *NewPage(Leaf, nil),
 			dirty:     true,
@@ -334,7 +339,7 @@ func (dumper *dumper) checkForSplit(ctx *context, level int, threshold int, newP
 		newPage := dumper.splitPage(pathItem.page, pathItem.page.Type(), startPoint, splitPoint)
 		// add new page's reference in it's parent
 		path[level-1].page.addKVPair(&memtable.KVPair{
-			Key:   newPage.Key(0),
+			Key:   newPage.mappingKey(),
 			Value: newPage.addr.ToValue(),
 		})
 		// commit this page for writing
@@ -353,7 +358,7 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 	// page size under threshold. Try to merge this page with it's right page of old path
 	if pathItem.index+1 < path[level-1].page.KVPairsCount() {
 		nextAddr := path[level-1].page.ChildAddress(pathItem.index + 1)
-		if nextAddr.equals(newPath[level].page.addr) {
+		if newPath != nil && nextAddr.equals(newPath[level].page.addr) {
 			// page of new path is the right page of old path, merge them together
 			pathItem.page.appendKVEntries(newPath[level].page.AllEntries())
 			path[level-1].page.removeKVEntryFromIndex(pathItem.index + 1)
@@ -371,7 +376,9 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 				dumper.checkForSplit(ctx, level, threshold, newPath)
 			} else {
 				ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
-				newPath[level].index = newPath[level].index - 1
+				if newPath != nil {
+					newPath[level].index = newPath[level].index - 1
+				}
 			}
 		}
 	} else if pathItem.index > 1 {
@@ -403,7 +410,9 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 			dumper.checkForSplit(ctx, level, threshold, newPath)
 		} else {
 			ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
-			newPath[level].index = newPath[level].index - 1
+			if newPath != nil {
+				newPath[level].index = newPath[level].index - 1
+			}
 		}
 	} else {
 		// commit this page for writing

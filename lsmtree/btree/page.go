@@ -229,7 +229,9 @@ func (page *pageForDump) addKVToIndex(key memtable.Key, value memtable.Value, in
 		index = -index - 1
 		// update size of the page
 		page.size += len(key) + len(value)
-
+		if index == 0 && page.shadowKey == nil && len(entries) != 0 {
+			page.shadowKey = entries[0].Key
+		}
 		leftPart := entries[0:index:index]
 		right := entries[index:len(entries):len(entries)]
 		leftPart = append(leftPart, &memtable.KVPair{Key: key, Value: value})
@@ -276,7 +278,9 @@ func (page *pageForDump) removeKV(key memtable.Key) {
 
 func (page *pageForDump) removeKVEntryFromIndex(index int) {
 	entries := page.AllEntries()
-
+	if index == 0 && page.shadowKey == nil {
+		page.shadowKey = entries[0].Key
+	}
 	leftPart := entries[0:index:index]
 	right := entries[index+1 : len(entries) : len(entries)]
 	page.entries = append(leftPart, right...)
