@@ -133,12 +133,12 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 
 func (dumper *dumper) putEntries(putEntries []*memtable.KVEntry, ctx *context) {
 	var rightSibling memtable.Key
-	path := ctx.path
+	var path []*pathItemForDump
 	for _, entry := range putEntries {
 		// check path
 		if path == nil || (rightSibling != nil && rightSibling.Compare(entry.Key) <= 0) {
 			// need fetch path cause origin path is nil/invalid
-			path = dumper.fetchPathForDumper(dumper.root, &entry.Key)
+			path = dumper.fetchPathForDumper(dumper.root, entry.Key)
 
 			// check with new path to commit pages that is writable
 			dumper.checkForCommit(ctx, path)
@@ -162,7 +162,7 @@ func (dumper *dumper) removeEntry(entry *memtable.KVEntry, ctx *context) {
 	if dumper.root == nil || !dumper.filter.MightContains(&entry.Key) {
 		return
 	}
-	path := dumper.fetchPathForDumper(dumper.root, &entry.Key)
+	path := dumper.fetchPathForDumper(dumper.root, entry.Key)
 	if path != nil {
 		// check with new path to commit pages that is writable
 		dumper.checkForCommit(ctx, path)
@@ -178,10 +178,10 @@ func (dumper *dumper) removeEntry(entry *memtable.KVEntry, ctx *context) {
 	dumper.filter.Remove(&entry.Key)
 
 	// modify page's content
-	leafPage.removeKVEntryFromIndex(index)
+	leafPage.removeKV(entry.Key)
 }
 
-func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) []*pathItemForDump {
+func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []*pathItemForDump {
 	if root == nil {
 		res := make([]*pathItemForDump, 2, 2)
 
@@ -191,7 +191,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 			dirty:     true,
 			valid:     false,
 			size:      0,
-			shadowKey: *key,
+			shadowKey: key,
 		}
 		res[1] = &pathItemForDump{&leaf, 0}
 		dumper.cache[leaf.addr] = &leaf
@@ -203,7 +203,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 			size:      0,
 			shadowKey: nil,
 		}
-		root.addKVToIndex(*key, leaf.addr.ToValue(), -1)
+		root.addKVToIndex(key, leaf.addr.ToValue(), -1)
 		res[0] = &pathItemForDump{&root, 0}
 		dumper.cache[root.addr] = &root
 
@@ -217,7 +217,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key *memtable.Key) [
 	parent := root
 	depth := 1
 	for {
-		index := parent.Search(key)
+		index := parent.Search(&key)
 		if index < 0 {
 			if index == -1 {
 				index = 0
@@ -331,7 +331,7 @@ func (dumper *dumper) checkForSplit(ctx *context, level int, threshold int, newP
 
 	// split current page, decommission current page
 	dumper.decommissionPage(pathItem.page)
-	path[level-1].page.removeKVEntryFromIndex(pathItem.index)
+	path[level-1].page.removeKV(pathItem.page.mappingKey())
 
 	// create new pages based on the splitPoint
 	startPoint := 0
@@ -360,17 +360,22 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 		nextAddr := path[level-1].page.ChildAddress(pathItem.index + 1)
 		if newPath != nil && nextAddr.equals(newPath[level].page.addr) {
 			// page of new path is the right page of old path, merge them together
+			leftCount := pathItem.page.KVPairsCount()
 			pathItem.page.appendKVEntries(newPath[level].page.AllEntries())
-			path[level-1].page.removeKVEntryFromIndex(pathItem.index + 1)
+			path[level-1].page.removeKV(newPath[level].page.mappingKey())
 			dumper.decommissionPage(newPath[level].page)
 
 			newPath[level].page = pathItem.page
 			newPath[level].index = pathItem.index
+			if pathItem.page.Type() == Index {
+				// update new path item index
+				newPath[level+1].index += leftCount
+			}
 		} else {
 			// read right page of old path and merge them together
 			nextPage := readPage(nextAddr)
 			pathItem.page.appendKVEntries(nextPage.AllEntries())
-			path[level-1].page.removeKVEntryFromIndex(pathItem.index + 1)
+			path[level-1].page.removeKV(nextPage.Key(0))
 			if newPath != nil && path[level-1].page == newPath[level-1].page {
 				newPath[level].index = newPath[level].index - 1
 			}
@@ -401,7 +406,8 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 				ctx.committed[level+1][pathItem.page.addr] = nil
 			}
 		}
-		path[level-1].page.removeKVEntryFromIndex(pathItem.index)
+		path[level-1].page.removeKV(pathItem.page.mappingKey())
+		path[level].index = path[level].index - 1
 		dumper.decommissionPage(pathItem.page)
 
 		if prevPage.size > threshold {
@@ -478,7 +484,7 @@ func (dumper *dumper) flush(ctx *context) {
 				page := pages[i]
 				if page.shadowKey != nil {
 					// remove shadow key and replace with current first key
-					parent.removeKVEntryFromIndex(parent.Search(&page.shadowKey))
+					parent.removeKV(page.shadowKey)
 					page.shadowKey = nil
 				}
 				parent.addKV(page.mappingKey(), addr.ToValue())

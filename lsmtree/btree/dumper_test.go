@@ -29,11 +29,15 @@ func TestPutEntries(t *testing.T) {
 	btree := &BTree{}
 	allEntries := make([]*memtable.KVEntry, 0)
 outer:
-	for i := 0; i < 30; i++ {
+	for i := 0; i < 1000; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper := buildDumperInstance(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
+		if !validateBTree(btree.lastTreeInfo.root) {
+			t.Error("tree invalid\n")
+			break outer
+		}
 
 		index := 0
 		// do list
@@ -65,11 +69,15 @@ func TestPutAndRemoveEntries(t *testing.T) {
 	dumper := buildDumperInstance(btree)
 	btree.lastTreeInfo = dumper.Dump(entries)
 outer:
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 200; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper := buildDumperInstance(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
+		if !validateBTree(btree.lastTreeInfo.root) {
+			t.Error("tree invalid\n")
+			break outer
+		}
 
 		index := 0
 		// do list
@@ -243,4 +251,40 @@ func randomBytes(n int, allowedChars ...[]rune) []byte {
 	}
 
 	return []byte(string(b))
+}
+
+func validateBTree(root *page) bool {
+	queue := make([]*page, 1)
+	queue[0] = root
+
+	for {
+		if len(queue) == 0 {
+			break
+		}
+		head := queue[0]
+		queue = queue[1:]
+
+		// check order of keys in head
+		for i := 0; i < head.KVPairsCount()-1; i++ {
+			if head.Key(i).Compare(head.Key(i+1)) >= 0 {
+				return false
+			}
+		}
+		if head.Type() == Root || head.Type() == Index {
+			// read child pages to do validation
+			for _, entry := range head.AllEntries() {
+				addr := newAddress(entry.Value)
+				page := readPage(addr)
+				if page.content == nil {
+					return false
+				}
+				// check mapping key
+				if entry.Key.Compare(page.Key(0)) != 0 {
+					return false
+				}
+				queue = append(queue, page)
+			}
+		}
+	}
+	return true
 }
