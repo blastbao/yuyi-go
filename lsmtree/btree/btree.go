@@ -83,7 +83,7 @@ type ListResult struct {
 
 func (tree *BTree) List(start memtable.Key, end memtable.Key, max int) *ListResult {
 	treeInfo := tree.lastTreeInfo
-	if treeInfo == nil || treeInfo.root == nil {
+	if treeInfo == nil || treeInfo.root == nil || treeInfo.root.KVPairsCount() == 0 {
 		return &ListResult{
 			pairs: []*memtable.KVPair{},
 			next:  nil,

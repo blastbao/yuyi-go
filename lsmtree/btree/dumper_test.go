@@ -29,7 +29,7 @@ func TestPutEntries(t *testing.T) {
 	btree := &BTree{}
 	allEntries := make([]*memtable.KVEntry, 0)
 outer:
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 20; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper := buildDumperInstance(btree)
@@ -38,6 +38,7 @@ outer:
 			t.Error("tree invalid\n")
 			break outer
 		}
+		fmt.Printf("Finish dump round %d\n", i)
 
 		index := 0
 		// do list
@@ -69,7 +70,7 @@ func TestPutAndRemoveEntries(t *testing.T) {
 	dumper := buildDumperInstance(btree)
 	btree.lastTreeInfo = dumper.Dump(entries)
 outer:
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 20; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper := buildDumperInstance(btree)
@@ -78,6 +79,7 @@ outer:
 			t.Error("tree invalid\n")
 			break outer
 		}
+		fmt.Printf("Finish dump round %d\n", i)
 
 		index := 0
 		// do list
@@ -95,6 +97,34 @@ outer:
 			if start == nil {
 				break
 			}
+		}
+	}
+}
+
+func TestPutAndRemoveAll(t *testing.T) {
+	btree := &BTree{}
+	var dumper *dumper
+
+	for i := 0; i < 20; i++ {
+		// put entries
+		entries := randomPutKVEntries(entriesCount)
+		dumper = buildDumperInstance(btree)
+		btree.lastTreeInfo = dumper.Dump(entries)
+
+		// remove entries
+		for _, entry := range entries {
+			entry.TableValue = memtable.TableValue{
+				Operation: memtable.Remove,
+				Value:     nil,
+			}
+		}
+		dumper = buildDumperInstance(btree)
+		btree.lastTreeInfo = dumper.Dump(entries)
+
+		listRes := btree.List(nil, nil, 1000)
+		if len(listRes.pairs) != 0 {
+			t.Error("tree is not empty")
+			break
 		}
 	}
 }

@@ -81,8 +81,8 @@ func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo)
 	dumper.flush(ctx)
 
 	for _, page := range dumper.cache {
-		if page != nil && page.Type() == Index && page.dirty == true {
-			fmt.Errorf("")
+		if page != nil && page.Type() != Root && page.dirty == true {
+			fmt.Printf("Found dirty page in cache\n")
 		}
 	}
 
@@ -123,6 +123,9 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 
 	// flush root
 	dumper.root.addr = dumper.writePage(dumper.root)
+	if dumper.root.KVPairsCount() == 0 {
+		dumper.treeDepth = 1
+	}
 
 	return &TreeInfo{
 		root:   readPage(dumper.root.addr),
@@ -182,7 +185,7 @@ func (dumper *dumper) removeEntry(entry *memtable.KVEntry, ctx *context) {
 }
 
 func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []*pathItemForDump {
-	if root == nil {
+	if root == nil || root.KVPairsCount() == 0 {
 		res := make([]*pathItemForDump, 2, 2)
 
 		// create empty leaf with the shadow key that first key to insert
@@ -195,19 +198,23 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []
 		}
 		res[1] = &pathItemForDump{&leaf, 0}
 		dumper.cache[leaf.addr] = &leaf
-		// create new root with leaf reference in root
-		root := pageForDump{
-			page:      *NewPage(Root, nil),
-			dirty:     true,
-			valid:     true,
-			size:      0,
-			shadowKey: nil,
-		}
-		root.addKVToIndex(key, leaf.addr.ToValue(), -1)
-		res[0] = &pathItemForDump{&root, 0}
-		dumper.cache[root.addr] = &root
 
-		dumper.root = &root
+		if root == nil {
+			// create new root with leaf reference in root
+			root = &pageForDump{
+				page:      *NewPage(Root, nil),
+				dirty:     true,
+				valid:     true,
+				size:      0,
+				shadowKey: nil,
+			}
+		}
+
+		root.addKVToIndex(key, leaf.addr.ToValue(), -1)
+		res[0] = &pathItemForDump{root, 0}
+		dumper.cache[root.addr] = root
+
+		dumper.root = root
 		dumper.treeDepth = 2
 		return res
 	}
@@ -406,9 +413,11 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 				ctx.committed[level+1][pathItem.page.addr] = nil
 			}
 		}
-		path[level-1].page.removeKV(pathItem.page.mappingKey())
-		path[level].index = path[level].index - 1
 		dumper.decommissionPage(pathItem.page)
+
+		path[level-1].page.removeKV(pathItem.page.mappingKey())
+		pathItem.page = prevPage
+		pathItem.index = path[level].index - 1
 
 		if prevPage.size > threshold {
 			dumper.checkForSplit(ctx, level, threshold, newPath)
@@ -480,7 +489,17 @@ func (dumper *dumper) flush(ctx *context) {
 			} else {
 				parent = dumper.cache[parentAddr]
 			}
-			for i, addr := range dumper.writePages(pages) {
+			pagesForWrite := make([]*pageForDump, 0, len(pages))
+			// filter pages that are empty
+			for _, page := range pages {
+				if page.KVPairsCount() != 0 {
+					pagesForWrite = append(pagesForWrite, page)
+				} else {
+					parent.removeKV(page.mappingKey())
+					dumper.decommissionPage(page)
+				}
+			}
+			for i, addr := range dumper.writePages(pagesForWrite) {
 				page := pages[i]
 				if page.shadowKey != nil {
 					// remove shadow key and replace with current first key
