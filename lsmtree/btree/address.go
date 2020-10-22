@@ -20,22 +20,24 @@ import (
 	"sync/atomic"
 	"yuyi-go/lsmtree/memtable"
 	"yuyi-go/shared"
+
+	"github.com/google/uuid"
 )
 
 const (
-	FileNameLength = 36
+	FileNameLength = 16
 
 	OffsetSize = 4
 	LengthSize = 4
 )
 
-var fakeFile = "                                    "
+var fakeFile = [16]byte{}
 var counter = int32(0)
 
 // address the address to find from disk
 type address struct {
 	// File the name of the file.
-	File string
+	File [16]byte
 	// Offset the start offset in the file of the address.
 	Offset int
 	// Length the length located in the file.
@@ -52,27 +54,30 @@ func newFakeAddr() address {
 	}
 }
 
-func (addr *address) ToString() string {
-	return fmt.Sprintf("%s %d %d", addr.File, addr.Offset, addr.Length)
+func (addr *address) String() string {
+	return fmt.Sprintf("%s %d %d", uuid.UUID(addr.File).String(), addr.Offset, addr.Length)
 }
 
-func (addr *address) ToValue() memtable.Value {
+func (addr *address) Value() memtable.Value {
 	value := make([]byte, 0)
 	buffer := bytes.NewBuffer(value)
-	shared.WriteString(buffer, addr.File)
+	shared.WriteBytes(buffer, addr.File[0:])
 	shared.WriteInt32(buffer, int32(addr.Offset))
 	shared.WriteInt32(buffer, int32(addr.Length))
 	return buffer.Bytes()
 }
 
 func (addr *address) equals(addr2 address) bool {
-	return addr.File == addr2.File && addr.Offset == addr2.Offset && addr.Length == addr2.Length
+	return bytes.Compare(addr.File[0:], addr2.File[0:]) == 0 && addr.Offset == addr2.Offset && addr.Length == addr2.Length
 }
 
 func newAddress(input []byte) address {
-	buffer := bytes.NewBuffer(input[0 : FileNameLength+OffsetSize+LengthSize : FileNameLength+OffsetSize+LengthSize])
+	var file [16]byte
+	copy(file[0:], input)
+
+	buffer := bytes.NewBuffer(input[FileNameLength : FileNameLength+OffsetSize+LengthSize : FileNameLength+OffsetSize+LengthSize])
 	return address{
-		File:   shared.ReadString(buffer, FileNameLength),
+		File:   file,
 		Offset: int(shared.ReadInt32(buffer)),
 		Length: int(shared.ReadInt32(buffer)),
 	}

@@ -58,6 +58,15 @@ func ReadString(buffer *bytes.Buffer, len int) string {
 	return string(res)
 }
 
+func ReadBytes(buffer *bytes.Buffer, len int) []byte {
+	res := make([]byte, len)
+	err := binary.Read(buffer, binary.BigEndian, res)
+	if err != nil {
+		log.Panic("Write bytes to buffer failed.")
+	}
+	return res
+}
+
 func ReadInt16(buffer *bytes.Buffer) int16 {
 	var res int16
 	err := binary.Read(buffer, binary.BigEndian, &res)

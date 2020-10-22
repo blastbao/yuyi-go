@@ -47,7 +47,7 @@ func randomPutKVPairs(count int) []*memtable.KVPair {
 		off += 8192
 		res[i] = &memtable.KVPair{
 			Key:   key,
-			Value: addr.ToValue(),
+			Value: addr.Value(),
 		}
 	}
 	sort.Slice(res, func(i, j int) bool {

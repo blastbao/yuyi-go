@@ -107,7 +107,7 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 					// add new page's reference in root
 					newRoot.addKVPair(&memtable.KVPair{
 						Key:   newPage.Key(0),
-						Value: newPage.addr.ToValue(),
+						Value: newPage.addr.Value(),
 					})
 					// commit this page for writing
 					ctx.commitPage(newPage, newRoot.addr, 0)
@@ -210,7 +210,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []
 			}
 		}
 
-		root.addKVToIndex(key, leaf.addr.ToValue(), -1)
+		root.addKVToIndex(key, leaf.addr.Value(), -1)
 		res[0] = &pathItemForDump{root, 0}
 		dumper.cache[root.addr] = root
 
@@ -347,7 +347,7 @@ func (dumper *dumper) checkForSplit(ctx *context, level int, threshold int, newP
 		// add new page's reference in it's parent
 		path[level-1].page.addKVPair(&memtable.KVPair{
 			Key:   newPage.mappingKey(),
-			Value: newPage.addr.ToValue(),
+			Value: newPage.addr.Value(),
 		})
 		// commit this page for writing
 		ctx.commitPage(newPage, path[level-1].page.addr, level)
@@ -506,7 +506,7 @@ func (dumper *dumper) flush(ctx *context) {
 					parent.removeKV(page.shadowKey)
 					page.shadowKey = nil
 				}
-				parent.addKV(page.mappingKey(), addr.ToValue())
+				parent.addKV(page.mappingKey(), addr.Value())
 
 				dumper.decommissionPage(page)
 			}
