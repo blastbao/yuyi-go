@@ -65,6 +65,14 @@ func (skipList *SkipList) casHead(old *head, new *head) bool {
 	return atomic.CompareAndSwapPointer(unsafePtr, unsafe.Pointer(old), unsafe.Pointer(new))
 }
 
+func (skipList *SkipList) Put(key Key, value Value, version int) error {
+	return skipList.doPut(key, value, version)
+}
+
+func (skipList *SkipList) Get(key Key, version int) Value {
+	return skipList.doGet(key, version)
+}
+
 func (skipList *SkipList) doPut(key Key, value Value, version int) error {
 	var added *node
 outer:
