@@ -22,9 +22,9 @@ import (
 )
 
 type node struct {
-	key     Key
-	value   Value
-	version int
+	key   Key
+	value *TableValue
+	seq   int
 
 	next *node
 }
@@ -60,45 +60,61 @@ type SkipList struct {
 	head *head
 }
 
+func NewSkipList() *SkipList {
+	n := &node{
+		seq: 0,
+	}
+	i := &index{
+		node: n,
+	}
+	h := &head{
+		index: i,
+		level: 1,
+	}
+	return &SkipList{
+		head: h,
+	}
+}
+
 func (skipList *SkipList) casHead(old *head, new *head) bool {
 	var unsafePtr = (*unsafe.Pointer)(unsafe.Pointer(&skipList.head))
 	return atomic.CompareAndSwapPointer(unsafePtr, unsafe.Pointer(old), unsafe.Pointer(new))
 }
 
-func (skipList *SkipList) Put(key Key, value Value, version int) error {
-	return skipList.doPut(key, value, version)
+func (skipList *SkipList) Put(entry *KVEntry) error {
+	return skipList.doPut(entry)
 }
 
-func (skipList *SkipList) Get(key Key, version int) Value {
-	return skipList.doGet(key, version)
+func (skipList *SkipList) Get(key Key, seq int) *TableValue {
+	return skipList.doGet(key, seq)
 }
 
-func (skipList *SkipList) doPut(key Key, value Value, version int) error {
+func (skipList *SkipList) doPut(entry *KVEntry) error {
 	var added *node
 outer:
 	for {
-		pre := skipList.findPredecessor(key, version)
+		pre := skipList.findPredecessor(entry.Key, entry.Seq)
 		suf := pre.next
 		for {
 			if suf != nil {
 				if pre.next != suf {
 					break
 				}
-				c := compareKeyAndVersion(key, version, suf.key, suf.version)
+				c := compareKeyAndSeq(entry.Key, entry.Seq, suf.key, suf.seq)
 				if c > 0 {
 					pre = suf
 					suf = suf.next
 					continue
 				}
 				if c == 0 {
-					// the compare result should never be 0 due to version is increment automic
+					// the compare result should never be 0 due to seq is increment automic
 				}
 			}
 			added = &node{
-				key:     key,
-				value:   value,
-				version: version,
-				next:    suf,
+				key:   entry.Key,
+				value: &entry.TableValue,
+				seq:   entry.Seq,
+				next:  suf,
 			}
 			if !pre.casNext(suf, added) {
 				break
@@ -113,6 +129,8 @@ outer:
 			rnd = rnd >> 1
 			if rnd&1 != 0 {
 				level++
+			} else {
+				break
 			}
 		}
 		var idx *index
@@ -128,7 +146,7 @@ outer:
 			}
 		} else {
 			level = max + 1
-			idxs := make([]*index, 0, level+1)
+			idxs := make([]*index, level+1, level+1)
 			for i := 1; i <= level; i++ {
 				idx = &index{
 					node:  added,
@@ -170,9 +188,12 @@ outer:
 			r := q.right
 			t := idx
 			for {
+				if q == nil || t == nil {
+					return nil
+				}
 				if r != nil {
 					n := r.node
-					c := compareKeyAndVersion(key, version, n.key, n.version)
+					c := compareKeyAndSeq(entry.Key, entry.Seq, n.key, n.seq)
 					if c > 0 {
 						q = r
 						r = r.right
@@ -202,22 +223,22 @@ outer:
 	return nil
 }
 
-func (skipList *SkipList) doGet(key Key, version int) Value {
+func (skipList *SkipList) doGet(key Key, seq int) *TableValue {
 outer:
 	for {
-		b := skipList.findPredecessor(key, version)
+		b := skipList.findPredecessor(key, seq)
 		n := b.next
 		for {
 			if n == nil {
 				break outer
 			}
-			if bytes.Compare(key, n.key) == 0 && version >= n.version {
+			if bytes.Compare(key, n.key) == 0 && seq >= n.seq {
 				return n.value
 			}
-			if bytes.Compare(key, b.key) == 0 && version >= b.version {
+			if bytes.Compare(key, b.key) == 0 && seq >= b.seq {
 				return b.value
 			}
-			c := compareKeyAndVersion(key, version, n.key, n.version)
+			c := compareKeyAndSeq(key, seq, n.key, n.seq)
 			if c < 0 {
 				break outer
 			}
@@ -229,14 +250,14 @@ outer:
 	return nil
 }
 
-func (skipList *SkipList) findPredecessor(key Key, version int) *node {
+func (skipList *SkipList) findPredecessor(key Key, seq int) *node {
 	for {
 		cur := skipList.head.index
 		right := cur.right
 		for {
 			if right != nil {
 				n := right.node
-				c := compareKeyAndVersion(key, version, n.key, n.version)
+				c := compareKeyAndSeq(key, seq, n.key, n.seq)
 				if c > 0 {
 					cur = right
 					right = right.right
@@ -253,10 +274,19 @@ func (skipList *SkipList) findPredecessor(key Key, version int) *node {
 	}
 }
 
-func compareKeyAndVersion(key1 Key, version1 int, key2 Key, version2 int) int {
+func compareKeyAndSeq(key1 Key, seq1 int, key2 Key, seq2 int) int {
 	res := key1.Compare(key2)
 	if res != 0 {
 		return res
 	}
-	return version1 - version2
+	return seq1 - seq2
 }
+
+type Iterator struct {
+	skipList *SkipList
+	current  *node
+}
+
+//func NewIterator(key Key, seq int) *Iterator {
+//
+//}

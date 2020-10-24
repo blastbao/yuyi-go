@@ -16,30 +16,105 @@ package memtable
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
+	"runtime"
+	"sync"
 	"testing"
 )
 
 func TestPutToSkipListSingleThread(t *testing.T) {
 	// generate key value pairs to put
-	pairs := make([]*KVPair, 10000)
-	for i := 0; i < 10000; i++ {
+	count := 1000000
+	pairs := make([]*KVPair, count)
+	for i := 0; i < count; i++ {
 		pairs[i] = &KVPair{
 			Key:   randomBytes(100, defaultLetters),
 			Value: randomBytes(200, defaultLetters),
 		}
 	}
 
-	skipList := SkipList{}
+	skipList := NewSkipList()
 	for i, pair := range pairs {
-		skipList.Put(pair.Key, pair.Value, i)
+		err := skipList.Put(&KVEntry{
+			Key: pair.Key,
+			TableValue: TableValue{
+				Operation: Put,
+				Value:     pair.Value,
+			},
+			Seq: i,
+		})
+		if err != nil {
+			t.Error("Put entry failed", pair.Key)
+			return
+		}
 	}
 
 	// iterate pairs to verify the put
 	for i, pair := range pairs {
 		v := skipList.Get(pair.Key, i)
-		if bytes.Compare(pair.Value, v) != 0 {
+		if bytes.Compare(pair.Value, v.Value) != 0 {
 			t.Error("Failed to get value with key ", pair.Key)
+			break
+		}
+	}
+}
+
+func TestPutToSkipListMiltyThread(t *testing.T) {
+	routines := 16
+	runtime.GOMAXPROCS(routines)
+
+	skipList := NewSkipList()
+	// generate key value pairs to put
+	count := 100000
+	pairs := make([]*KVPair, count)
+	for i := 0; i < count; i++ {
+		pairs[i] = &KVPair{
+			Key:   randomBytes(100, defaultLetters),
+			Value: randomBytes(200, defaultLetters),
+		}
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(routines)
+	for num := 0; num < routines; num++ {
+		index := num
+		go func() {
+			defer wg.Done()
+
+			fmt.Printf("Start put in goroutine %d\n", index)
+			for i, pair := range pairs {
+				if i%routines != index {
+					continue
+				}
+
+				err := skipList.Put(&KVEntry{
+					Key: pair.Key,
+					TableValue: TableValue{
+						Operation: Put,
+						Value:     pair.Value,
+					},
+					Seq: i,
+				})
+				if err != nil {
+					t.Error("Put entry failed", pair.Key)
+					return
+				}
+			}
+			fmt.Printf("Finish put in goroutine %d\n", index)
+		}()
+	}
+	wg.Wait()
+
+	fmt.Println("Verify the put result")
+	// iterate pairs to verify the put
+	for i, pair := range pairs {
+		v := skipList.Get(pair.Key, i)
+		if v == nil {
+			t.Error("Failed to get value with key ", pair.Key)
+			break
+		}
+		if bytes.Compare(pair.Value, v.Value) != 0 {
 			break
 		}
 	}
