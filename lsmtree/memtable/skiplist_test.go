@@ -19,13 +19,14 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"sort"
 	"sync"
 	"testing"
 )
 
 func TestPutToSkipListSingleThread(t *testing.T) {
 	// generate key value pairs to put
-	count := 1000000
+	count := 100000
 	pairs := make([]*KVPair, count)
 	for i := 0; i < count; i++ {
 		pairs[i] = &KVPair{
@@ -42,7 +43,7 @@ func TestPutToSkipListSingleThread(t *testing.T) {
 				Operation: Put,
 				Value:     pair.Value,
 			},
-			Seq: i,
+			Seq: uint64(i),
 		})
 		if err != nil {
 			t.Error("Put entry failed", pair.Key)
@@ -50,14 +51,7 @@ func TestPutToSkipListSingleThread(t *testing.T) {
 		}
 	}
 
-	// iterate pairs to verify the put
-	for i, pair := range pairs {
-		v := skipList.Get(pair.Key, i)
-		if bytes.Compare(pair.Value, v.Value) != 0 {
-			t.Error("Failed to get value with key ", pair.Key)
-			break
-		}
-	}
+	verifyPutResult(t, skipList, pairs)
 }
 
 func TestPutToSkipListMiltyThread(t *testing.T) {
@@ -94,7 +88,7 @@ func TestPutToSkipListMiltyThread(t *testing.T) {
 						Operation: Put,
 						Value:     pair.Value,
 					},
-					Seq: i,
+					Seq: uint64(i),
 				})
 				if err != nil {
 					t.Error("Put entry failed", pair.Key)
@@ -106,17 +100,40 @@ func TestPutToSkipListMiltyThread(t *testing.T) {
 	}
 	wg.Wait()
 
+	verifyPutResult(t, skipList, pairs)
+}
+
+func verifyPutResult(t *testing.T, skipList *SkipList, pairs []*KVPair) {
 	fmt.Println("Verify the put result")
+
 	// iterate pairs to verify the put
 	for i, pair := range pairs {
-		v := skipList.Get(pair.Key, i)
-		if v == nil {
+		v := skipList.Get(pair.Key, uint64(i))
+		if bytes.Compare(pair.Value, v.Value) != 0 {
 			t.Error("Failed to get value with key ", pair.Key)
 			break
 		}
-		if bytes.Compare(pair.Value, v.Value) != 0 {
+	}
+
+	sort.Slice(pairs, func(i, j int) bool {
+		return bytes.Compare(pairs[i].Key, pairs[j].Key) <= 0
+	})
+	i := 0
+	iterator := skipList.NewIterator(nil, nil, 0)
+	for {
+		if iterator.hasNext() {
+			entry := iterator.next()
+			if entry.Key.Compare(pairs[i].Key) != 0 {
+				t.Error("Failed to iterator skip list")
+				break
+			}
+			i++
+		} else {
 			break
 		}
+	}
+	if i != len(pairs) {
+		t.Error("Failed to iterator skip list")
 	}
 }
 

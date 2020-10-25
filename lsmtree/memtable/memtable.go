@@ -15,18 +15,28 @@
 package memtable
 
 type MemTable struct {
+	skipList *SkipList
 	sealed   bool
 	capacity int32
 }
 
-func (t *MemTable) Contains(key *Key) bool {
-	return false
+func NewMemTable() *MemTable {
+	skipList := NewSkipList()
+	return &MemTable{
+		skipList: skipList,
+		sealed:   false,
+		capacity: 0,
+	}
 }
 
-func (t *MemTable) Has(key *Key) bool {
-	return false
+func (memTable *MemTable) Has(key Key, seq uint64) bool {
+	return memTable.skipList.Get(key, seq) != nil
 }
 
-func (t *MemTable) GetIfExists(key *Key) Value {
-	return nil
+func (memTable *MemTable) Get(key Key, seq uint64) *TableValue {
+	return memTable.skipList.Get(key, seq)
+}
+
+func (memTable *MemTable) List(start Key, end Key, seq uint64) *Iterator {
+	return memTable.skipList.NewIterator(start, end, seq)
 }

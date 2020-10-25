@@ -42,7 +42,7 @@ type KVPair struct {
 type KVEntry struct {
 	Key        Key
 	TableValue TableValue
-	Seq        int
+	Seq        uint64
 }
 
 func (key Key) Compare(another Key) int {

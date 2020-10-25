@@ -24,7 +24,7 @@ import (
 type node struct {
 	key   Key
 	value *TableValue
-	seq   int
+	seq   uint64
 
 	next *node
 }
@@ -85,7 +85,7 @@ func (skipList *SkipList) Put(entry *KVEntry) error {
 	return skipList.doPut(entry)
 }
 
-func (skipList *SkipList) Get(key Key, seq int) *TableValue {
+func (skipList *SkipList) Get(key Key, seq uint64) *TableValue {
 	return skipList.doGet(key, seq)
 }
 
@@ -215,6 +215,9 @@ outer:
 				if j >= insertionLevel && j < level {
 					t = t.down
 				}
+				if q == nil || q.down == nil {
+					return nil
+				}
 				q = q.down
 				r = q.right
 			}
@@ -223,7 +226,7 @@ outer:
 	return nil
 }
 
-func (skipList *SkipList) doGet(key Key, seq int) *TableValue {
+func (skipList *SkipList) doGet(key Key, seq uint64) *TableValue {
 outer:
 	for {
 		b := skipList.findPredecessor(key, seq)
@@ -250,7 +253,7 @@ outer:
 	return nil
 }
 
-func (skipList *SkipList) findPredecessor(key Key, seq int) *node {
+func (skipList *SkipList) findPredecessor(key Key, seq uint64) *node {
 	for {
 		cur := skipList.head.index
 		right := cur.right
@@ -274,19 +277,48 @@ func (skipList *SkipList) findPredecessor(key Key, seq int) *node {
 	}
 }
 
-func compareKeyAndSeq(key1 Key, seq1 int, key2 Key, seq2 int) int {
+func compareKeyAndSeq(key1 Key, seq1 uint64, key2 Key, seq2 uint64) int {
 	res := key1.Compare(key2)
 	if res != 0 {
 		return res
 	}
-	return seq1 - seq2
+	return int(seq1 - seq2)
 }
 
 type Iterator struct {
 	skipList *SkipList
 	current  *node
+	endKey   Key
+	seq      uint64
 }
 
-//func NewIterator(key Key, seq int) *Iterator {
-//
-//}
+func (skipList *SkipList) NewIterator(start Key, end Key, seq uint64) *Iterator {
+	pre := skipList.findPredecessor(start, seq)
+	return &Iterator{
+		skipList: skipList,
+		current:  pre,
+		endKey:   end,
+		seq:      seq,
+	}
+}
+
+func (iterator *Iterator) hasNext() bool {
+	if iterator.current == nil || iterator.current.next == nil {
+		return false
+	}
+	if iterator.endKey != nil {
+		n := iterator.current.next
+		return compareKeyAndSeq(n.key, n.seq, iterator.endKey, iterator.seq) < 0
+	}
+	return true
+}
+
+func (iterator *Iterator) next() KVEntry {
+	n := iterator.current.next
+	iterator.current = iterator.current.next
+	return KVEntry{
+		Key:        n.key,
+		TableValue: *n.value,
+		Seq:        n.seq,
+	}
+}
