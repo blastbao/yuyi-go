@@ -15,55 +15,127 @@
 package chunk
 
 import (
+	"hash/crc32"
 	"io"
-	"sync"
+	"io/ioutil"
+
+	"github.com/golang/snappy"
+	"github.com/google/uuid"
 )
 
 type ChunkWrtier interface {
 	Write(p []byte) (addr Address, err error)
-
-	BatchWrite(p [][]byte) (addrs []Address, err error)
 }
 
 type btreeWriter struct {
 	chunk  *chunk
 	offset int
-	mutex  sync.Mutex
-	piped  io.Writer
+	writer io.Writer
 }
 
-func (writer *btreeWriter) Write(p []byte) (Address, error) {
-	len := len(p)
-	// check if chunk is full
-	if writer.offset+len >= writer.chunk.capacity {
-		err := writer.rotate()
+func newBtreeWriter() (*btreeWriter, error) {
+	c, err := newChunk()
+	if err != nil {
+		return nil, err
+	}
+	writer := newChainedWriter(c)
+	return &btreeWriter{
+		chunk:  c,
+		offset: 0,
+		writer: writer,
+	}, nil
+}
+
+func (w *btreeWriter) Write(p []byte) (addr Address, err error) {
+	// try rotate chunk if current chunk is nil
+	if w.chunk == nil {
+		err = w.rotate()
 		if err != nil {
-			return Address{}, err
+			return addr, err
 		}
 	}
-	_, err := writer.piped.Write(p)
-	if err != nil {
-		return Address{}, err
+
+	len := len(p)
+	// check if chunk is full
+	if w.offset+len >= w.chunk.capacity {
+		err = w.rotate()
+		if err != nil {
+			return addr, err
+		}
 	}
-	addr := Address{
-		Chunk:  writer.chunk.name,
-		Offset: writer.offset,
+	_, err = w.writer.Write(p)
+	if err != nil {
+		err2 := w.rotate()
+		if err != nil {
+			return addr, err2
+		}
+		return addr, err
+	}
+	addr = Address{
+		Chunk:  w.chunk.name,
+		Offset: w.offset,
 		Length: len,
 	}
-	writer.offset += len
+	w.offset += len
 	return addr, nil
 }
 
-func (writer *btreeWriter) rotate() error {
-	writer.mutex.Lock()
-	defer writer.mutex.Unlock()
-
-	chunk, err := NewChunk()
+func (w *btreeWriter) rotate() error {
+	chunk, err := newChunk()
 	if err != nil {
+		w.chunk = nil // set chunk nil as origin chunk is no longer available to write
 		return err
 	}
 	// set new chunk and new offset for writer
-	writer.chunk = chunk
-	writer.offset = 0
+	w.chunk = chunk
+	w.offset = 0
+	w.writer = newChainedWriter(chunk)
 	return nil
+}
+
+// newChainedWriter add crc32 check checksum segment and snappy compression when writing disk
+func newChainedWriter(c *chunk) io.Writer {
+	return &crc32Writer{
+		writer: &snappyWriter{
+			writer: &fileWriter{
+				file: chunkFileName(c.name),
+			},
+		},
+	}
+}
+
+type crc32Writer struct {
+	chunk  uuid.UUID
+	writer io.Writer
+}
+
+func (w *crc32Writer) Write(p []byte) (n int, err error) {
+	chechsum := crc32.ChecksumIEEE(p)
+
+	block := make([]byte, len(p)+16+4) // 16 length of uuid, 4 length of checksum
+	block = append(block, w.chunk[0:]...)
+	block = append(block, p...)
+	block = append(block, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum))
+	return w.writer.Write(block)
+}
+
+type snappyWriter struct {
+	writer io.Writer
+}
+
+func (w *snappyWriter) Write(p []byte) (n int, err error) {
+	block := snappy.Encode(nil, p)
+	return w.writer.Write(block)
+}
+
+type fileWriter struct {
+	file string
+}
+
+func (w *fileWriter) Write(p []byte) (n int, err error) {
+	err = ioutil.WriteFile(w.file, p, 0666)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }

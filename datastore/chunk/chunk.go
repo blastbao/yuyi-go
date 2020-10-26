@@ -37,9 +37,9 @@ type chunk struct {
 	sealedLength int
 }
 
-func NewChunk() (*chunk, error) {
+func newChunk() (*chunk, error) {
 	name := uuid.New()
-	_, err := os.Create(folder + name.String())
+	_, err := os.Create(chunkFileName(name))
 	if err != nil {
 		return nil, err
 	}
@@ -51,4 +51,8 @@ func NewChunk() (*chunk, error) {
 		sealed:      false,
 	}
 	return c, nil
+}
+
+func chunkFileName(name uuid.UUID) string {
+	return folder + name.String()
 }

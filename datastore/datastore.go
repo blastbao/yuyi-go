@@ -20,6 +20,9 @@ var (
 )
 
 type DataStore struct {
+	// name the name of the datastore
+	name string
+
 	// activeMemTable current using memory table for writing data to.
 	activeMemTable MemTable
 
