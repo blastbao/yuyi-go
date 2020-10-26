@@ -12,31 +12,38 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package memtable
+package datastore
 
-type MemTable struct {
-	skipList *SkipList
-	sealed   bool
-	capacity int32
-}
+import (
+	"yuyi-go/datastore/chunk"
 
-func NewMemTable() *MemTable {
-	skipList := NewSkipList()
-	return &MemTable{
-		skipList: skipList,
-		sealed:   false,
-		capacity: 0,
+	"github.com/google/uuid"
+)
+
+// MaxLength set max capacity of each file to 512k
+const MaxLength = 512 * 1024
+
+var (
+	file = uuid.New()
+	off  = 0
+
+	cache = map[chunk.Address][]byte{}
+)
+
+func writeTo(input []byte) chunk.Address {
+	size := len(input)
+	if off+size > MaxLength {
+		// need rotate to another file
+		file = uuid.New()
+		off = 0
 	}
+	// create new address and cache it.
+	res := chunk.Address{Chunk: file, Offset: off, Length: size}
+	cache[res] = input
+	off += size
+	return res
 }
 
-func (memTable *MemTable) Has(key Key, seq uint64) bool {
-	return memTable.skipList.Get(key, seq) != nil
-}
-
-func (memTable *MemTable) Get(key Key, seq uint64) *TableValue {
-	return memTable.skipList.Get(key, seq)
-}
-
-func (memTable *MemTable) List(start Key, end Key, seq uint64) *Iterator {
-	return memTable.skipList.NewIterator(start, end, seq)
+func ReadFrom(addr chunk.Address) []byte {
+	return cache[addr]
 }

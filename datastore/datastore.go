@@ -12,12 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package lsmtree
-
-import (
-	"yuyi-go/lsmtree/btree"
-	"yuyi-go/lsmtree/memtable"
-)
+package datastore
 
 var (
 	minSeq = uint64(0)
@@ -26,14 +21,14 @@ var (
 
 type DataStore struct {
 	// activeMemTable current using memory table for writing data to.
-	activeMemTable memtable.MemTable
+	activeMemTable MemTable
 
 	// sealedMemTables the memory table instances that already reached
 	//max limit size and need be persisted
-	sealedMemTables []*memtable.MemTable
+	sealedMemTables []*MemTable
 
 	// btree the structure for persisting data from memory table
-	btree *btree.BTree
+	btree *BTree
 
 	// seq the sequence of write operation. When read started, current
 	// sequence will be acquired and make sure that no later committed
@@ -41,19 +36,19 @@ type DataStore struct {
 	seq uint64
 }
 
-func (store *DataStore) Put(key memtable.Key, value memtable.Value) {
+func (store *DataStore) Put(key Key, value Value) {
 	return
 }
 
-func (store *DataStore) Remove(key memtable.Key) {
+func (store *DataStore) Remove(key Key) {
 	return
 }
 
-func (store *DataStore) Has(key memtable.Key) bool {
+func (store *DataStore) Has(key Key) bool {
 	seq := store.seq
 	value := store.activeMemTable.Get(key, seq)
 	if value != nil {
-		if value.Operation == memtable.Remove {
+		if value.Operation == Remove {
 			return false
 		}
 		return true
@@ -61,7 +56,7 @@ func (store *DataStore) Has(key memtable.Key) bool {
 	for _, table := range store.sealedMemTables {
 		value := table.Get(key, maxSeq)
 		if value != nil {
-			if value.Operation == memtable.Remove {
+			if value.Operation == Remove {
 				return false
 			}
 			return true
@@ -70,11 +65,11 @@ func (store *DataStore) Has(key memtable.Key) bool {
 	return store.btree.Has(&key)
 }
 
-func (store *DataStore) Get(key memtable.Key) memtable.Value {
+func (store *DataStore) Get(key Key) Value {
 	seq := store.seq
 	value := store.activeMemTable.Get(key, seq)
 	if value != nil {
-		if value.Operation == memtable.Remove {
+		if value.Operation == Remove {
 			return nil
 		}
 		return value.Value
@@ -82,7 +77,7 @@ func (store *DataStore) Get(key memtable.Key) memtable.Value {
 	for _, table := range store.sealedMemTables {
 		value := table.Get(key, maxSeq)
 		if value != nil {
-			if value.Operation == memtable.Remove {
+			if value.Operation == Remove {
 				return nil
 			}
 			return value.Value
@@ -91,7 +86,7 @@ func (store *DataStore) Get(key memtable.Key) memtable.Value {
 	return store.btree.Get(&key)
 }
 
-func (store *DataStore) List(start memtable.Key, end memtable.Key, max int) []*memtable.KVPair {
+func (store *DataStore) List(start Key, end Key, max int) []*KVPair {
 	// seq := store.seq
 	// activeIter := store.activeMemTable.List(start, end, seq)
 	// sealedIter := make([]*memtable.Iterator, 0)
@@ -106,6 +101,6 @@ func (store *DataStore) List(start memtable.Key, end memtable.Key, max int) []*m
 	return nil
 }
 
-func ReverseList(start memtable.Key, end memtable.Value, max uint16) []memtable.Value {
+func ReverseList(start Key, end Value, max uint16) []Value {
 	return nil
 }

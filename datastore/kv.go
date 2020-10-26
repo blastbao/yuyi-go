@@ -12,34 +12,39 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package btree
+package datastore
 
-import "github.com/google/uuid"
+import "bytes"
 
-// MaxLength set max capacity of each file to 512k
-const MaxLength = 512 * 1024
+type OPERATION uint8
 
-var (
-	file = uuid.New()
-	off  = 0
-
-	cache = map[address][]byte{}
+const (
+	Put       OPERATION = 1
+	PutAbsent OPERATION = 2
+	Remove    OPERATION = 3
+	PageCopy  OPERATION = 4
 )
 
-func writeTo(input []byte) address {
-	size := len(input)
-	if off+size > MaxLength {
-		// need rotate to another file
-		file = uuid.New()
-		off = 0
-	}
-	// create new address and cache it.
-	res := address{File: file, Offset: off, Length: size}
-	cache[res] = input
-	off += size
-	return res
+type Key []byte
+
+type Value []byte
+
+type TableValue struct {
+	Operation OPERATION
+	Value     Value
 }
 
-func ReadFrom(address address) []byte {
-	return cache[address]
+type KVPair struct {
+	Key   Key
+	Value Value
+}
+
+type KVEntry struct {
+	Key        Key
+	TableValue TableValue
+	Seq        uint64
+}
+
+func (key Key) Compare(another Key) int {
+	return bytes.Compare(key, another)
 }

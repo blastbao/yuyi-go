@@ -12,11 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package btree
+package datastore
 
-import (
-	"yuyi-go/lsmtree/memtable"
-)
+import "yuyi-go/datastore/chunk"
 
 type BTree struct {
 	// lastTreeInfo last tree info after Cow synced from memory table.
@@ -44,7 +42,7 @@ type pathItemForDump struct {
 	index int
 }
 
-func (tree *BTree) Has(key *memtable.Key) bool {
+func (tree *BTree) Has(key *Key) bool {
 	treeInfo := tree.lastTreeInfo
 	skipRead := !mightContains(treeInfo, key)
 	if skipRead {
@@ -57,7 +55,7 @@ func (tree *BTree) Has(key *memtable.Key) bool {
 	return leaf.Search(key) >= 0
 }
 
-func (tree *BTree) Get(key *memtable.Key) memtable.Value {
+func (tree *BTree) Get(key *Key) Value {
 	treeInfo := tree.lastTreeInfo
 	skipRead := !mightContains(treeInfo, key)
 	if skipRead {
@@ -77,20 +75,20 @@ func (tree *BTree) Get(key *memtable.Key) memtable.Value {
 }
 
 type ListResult struct {
-	pairs []*memtable.KVPair
-	next  *memtable.Key
+	pairs []*KVPair
+	next  *Key
 }
 
-func (tree *BTree) List(start memtable.Key, end memtable.Key, max int) *ListResult {
+func (tree *BTree) List(start Key, end Key, max int) *ListResult {
 	treeInfo := tree.lastTreeInfo
 	if treeInfo == nil || treeInfo.root == nil || treeInfo.root.KVPairsCount() == 0 {
 		return &ListResult{
-			pairs: []*memtable.KVPair{},
+			pairs: []*KVPair{},
 			next:  nil,
 		}
 	}
 
-	res := make([]*memtable.KVPair, 0, max)
+	res := make([]*KVPair, 0, max)
 	if start == nil {
 		start = []byte{}
 	}
@@ -99,7 +97,7 @@ func (tree *BTree) List(start memtable.Key, end memtable.Key, max int) *ListResu
 	leaf := path[len(path)-1].page
 	pairsCount := leaf.KVPairsCount()
 	if pairsCount == 0 {
-		return &ListResult{make([]*memtable.KVPair, 0), nil}
+		return &ListResult{make([]*KVPair, 0), nil}
 	}
 
 	startIndex := leaf.Search(&start)
@@ -108,7 +106,7 @@ func (tree *BTree) List(start memtable.Key, end memtable.Key, max int) *ListResu
 	}
 
 	keyFound := 0
-	var next memtable.Key
+	var next Key
 outer:
 	for {
 		for i := startIndex; i < pairsCount; i++ {
@@ -136,12 +134,12 @@ outer:
 	return &ListResult{res, &next}
 }
 
-func (tree *BTree) ReverseList(start memtable.Key, end memtable.Key, max int) []memtable.KVPair {
+func (tree *BTree) ReverseList(start Key, end Key, max int) []KVPair {
 	return nil
 }
 
 // findPath find the path from root page to leaf page with the specified key
-func (tree *BTree) findPath(treeInfo *TreeInfo, key *memtable.Key) []*pathItem {
+func (tree *BTree) findPath(treeInfo *TreeInfo, key *Key) []*pathItem {
 	root := treeInfo.root
 	// create result slice and put root to the result
 	res := make([]*pathItem, treeInfo.depth, treeInfo.depth)
@@ -204,14 +202,14 @@ func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
 	return curPath
 }
 
-func mightContains(treeInfo *TreeInfo, key *memtable.Key) bool {
+func mightContains(treeInfo *TreeInfo, key *Key) bool {
 	if treeInfo == nil || !treeInfo.filter.MightContains(key) {
 		return false
 	}
 	return true
 }
 
-func readPage(addr address) *page {
+func readPage(addr chunk.Address) *page {
 	content := ReadFrom(addr)
 	return &page{
 		content: content,

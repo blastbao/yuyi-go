@@ -12,26 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package btree
-
-import (
-	"yuyi-go/lsmtree/memtable"
-)
+package datastore
 
 // Filter filter is used to do a quick check if the specified key already
 // existed.
 type Filter interface {
 	// Put put the specified key in filter.
-	Put(key *memtable.Key)
+	Put(key *Key)
 
 	// Remove remove the specified key from filter.
-	Remove(key *memtable.Key)
+	Remove(key *Key)
 
 	// SupportRemove if the filter support remove key from itself.
 	SupportRemove() bool
 
 	// MightContains if the specified key may already existed.
-	MightContains(key *memtable.Key) bool
+	MightContains(key *Key) bool
 }
 
 type CocoFilter struct {
@@ -41,12 +37,12 @@ type dummyFilter struct {
 }
 
 // Put put the specified key in filter.
-func (filter *dummyFilter) Put(key *memtable.Key) {
+func (filter *dummyFilter) Put(key *Key) {
 	return
 }
 
 // Remove remove the specified key from filter.
-func (filter *dummyFilter) Remove(key *memtable.Key) {
+func (filter *dummyFilter) Remove(key *Key) {
 	return
 }
 
@@ -56,6 +52,6 @@ func (filter *dummyFilter) SupportRemove() bool {
 }
 
 // MightContains if the specified key may already existed.
-func (filter *dummyFilter) MightContains(key *memtable.Key) bool {
+func (filter *dummyFilter) MightContains(key *Key) bool {
 	return true
 }

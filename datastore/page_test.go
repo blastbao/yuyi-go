@@ -1,10 +1,10 @@
-package btree
+package datastore
 
 import (
 	"bytes"
 	"sort"
 	"testing"
-	"yuyi-go/lsmtree/memtable"
+	"yuyi-go/datastore/chunk"
 )
 
 func TestIndexPage(t *testing.T) {
@@ -21,7 +21,7 @@ func TestIndexPage(t *testing.T) {
 	page := &page{
 		content: content,
 		entries: nil,
-		addr:    address{File: file, Offset: 0, Length: 0},
+		addr:    chunk.Address{Chunk: file, Offset: 0, Length: 0},
 	}
 
 	if page.Type() != Index {
@@ -37,17 +37,17 @@ func TestIndexPage(t *testing.T) {
 	}
 }
 
-func randomPutKVPairs(count int) []*memtable.KVPair {
-	res := make([]*memtable.KVPair, count)
+func randomPutKVPairs(count int) []*KVPair {
+	res := make([]*KVPair, count)
 	for i := 0; i < count; i++ {
 		key := randomBytes(keyLen, defaultLetters)
 
 		// create new address and cache it.
-		addr := address{File: file, Offset: off, Length: 8192}
+		addr := chunk.Address{Chunk: file, Offset: off, Length: 8192}
 		off += 8192
-		res[i] = &memtable.KVPair{
+		res[i] = &KVPair{
 			Key:   key,
-			Value: addr.Value(),
+			Value: addr.Bytes(),
 		}
 	}
 	sort.Slice(res, func(i, j int) bool {

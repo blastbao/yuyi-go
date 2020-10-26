@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package btree
+package datastore
 
 import (
 	"bytes"
@@ -20,14 +20,14 @@ import (
 	"math/rand"
 	"sort"
 	"testing"
-	"yuyi-go/lsmtree/memtable"
+	"yuyi-go/datastore/chunk"
 )
 
 var entriesCount = 2000
 
 func TestPutEntries(t *testing.T) {
 	btree := &BTree{}
-	allEntries := make([]*memtable.KVEntry, 0)
+	allEntries := make([]*KVEntry, 0)
 outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutKVEntries(entriesCount)
@@ -42,7 +42,7 @@ outer:
 
 		index := 0
 		// do list
-		var start memtable.Key
+		var start Key
 		for {
 			listRes := btree.List(start, nil, 1000)
 			for _, pair := range listRes.pairs {
@@ -62,7 +62,7 @@ outer:
 
 func TestPutAndRemoveEntries(t *testing.T) {
 	btree := &BTree{}
-	allEntries := make([]*memtable.KVEntry, 0)
+	allEntries := make([]*KVEntry, 0)
 
 	// init with 2000 put entries
 	entries := randomPutKVEntries(entriesCount)
@@ -83,7 +83,7 @@ outer:
 
 		index := 0
 		// do list
-		var start memtable.Key
+		var start Key
 		for {
 			listRes := btree.List(start, nil, 1000)
 			for _, pair := range listRes.pairs {
@@ -113,8 +113,8 @@ func TestPutAndRemoveAll(t *testing.T) {
 
 		// remove entries
 		for _, entry := range entries {
-			entry.TableValue = memtable.TableValue{
-				Operation: memtable.Remove,
+			entry.TableValue = TableValue{
+				Operation: Remove,
 				Value:     nil,
 			}
 		}
@@ -146,7 +146,7 @@ func buildDumperInstance(btree *BTree) *dumper {
 			btree:         btree,
 			root:          &root,
 			filter:        &dummyFilter{},
-			cache:         map[address]*pageForDump{},
+			cache:         map[chunk.Address]*pageForDump{},
 			treeDepth:     depth,
 			leafPageSize:  8192,
 			indexPageSize: 8192,
@@ -156,7 +156,7 @@ func buildDumperInstance(btree *BTree) *dumper {
 		btree:         btree,
 		root:          nil,
 		filter:        &dummyFilter{},
-		cache:         map[address]*pageForDump{},
+		cache:         map[chunk.Address]*pageForDump{},
 		treeDepth:     0,
 		leafPageSize:  8192,
 		indexPageSize: 8192,
@@ -166,15 +166,15 @@ func buildDumperInstance(btree *BTree) *dumper {
 var keyLen = 100
 var valueLen = 200
 
-func randomPutKVEntries(count int) []*memtable.KVEntry {
-	res := make([]*memtable.KVEntry, count)
+func randomPutKVEntries(count int) []*KVEntry {
+	res := make([]*KVEntry, count)
 	for i := 0; i < count; i++ {
 		key := randomBytes(keyLen, defaultLetters)
 		value := randomBytes(valueLen, defaultLetters)
-		res[i] = &memtable.KVEntry{
+		res[i] = &KVEntry{
 			Key: key,
-			TableValue: memtable.TableValue{
-				Operation: memtable.Put,
+			TableValue: TableValue{
+				Operation: Put,
 				Value:     value,
 			},
 		}
@@ -185,14 +185,14 @@ func randomPutKVEntries(count int) []*memtable.KVEntry {
 	return res
 }
 
-func randomPutAndRemoveKVEntries(entries []*memtable.KVEntry, count int, removePer int) []*memtable.KVEntry {
-	res := make([]*memtable.KVEntry, count)
+func randomPutAndRemoveKVEntries(entries []*KVEntry, count int, removePer int) []*KVEntry {
+	res := make([]*KVEntry, count)
 	deleted := map[int]bool{}
 
 	length := len(entries)
 	for i := 0; i < count; i++ {
 		if rand.Intn(100) < removePer {
-			var key memtable.Key
+			var key Key
 			for {
 				deleteIndex := rand.Intn(length)
 				if deleted[deleteIndex] == false {
@@ -203,20 +203,20 @@ func randomPutAndRemoveKVEntries(entries []*memtable.KVEntry, count int, removeP
 					fmt.Errorf("Hit duplicated key for delete")
 				}
 			}
-			res[i] = &memtable.KVEntry{
+			res[i] = &KVEntry{
 				Key: key,
-				TableValue: memtable.TableValue{
-					Operation: memtable.Remove,
+				TableValue: TableValue{
+					Operation: Remove,
 					Value:     nil,
 				},
 			}
 		} else {
 			key := randomBytes(keyLen, defaultLetters)
 			value := randomBytes(valueLen, defaultLetters)
-			res[i] = &memtable.KVEntry{
+			res[i] = &KVEntry{
 				Key: key,
-				TableValue: memtable.TableValue{
-					Operation: memtable.Put,
+				TableValue: TableValue{
+					Operation: Put,
 					Value:     value,
 				},
 			}
@@ -228,8 +228,8 @@ func randomPutAndRemoveKVEntries(entries []*memtable.KVEntry, count int, removeP
 	return res
 }
 
-func mergeEntries(allEntries []*memtable.KVEntry, newEntries []*memtable.KVEntry) []*memtable.KVEntry {
-	mergedEntries := make([]*memtable.KVEntry, 0)
+func mergeEntries(allEntries []*KVEntry, newEntries []*KVEntry) []*KVEntry {
+	mergedEntries := make([]*KVEntry, 0)
 
 	i := 0
 	j := 0
@@ -239,13 +239,13 @@ func mergeEntries(allEntries []*memtable.KVEntry, newEntries []*memtable.KVEntry
 		}
 		res := allEntries[i].Key.Compare(newEntries[j].Key)
 		if res == 0 {
-			if newEntries[j].TableValue.Operation != memtable.Remove {
+			if newEntries[j].TableValue.Operation != Remove {
 				mergedEntries = append(mergedEntries, newEntries[j])
 			}
 			i++
 			j++
 		} else if res > 0 {
-			if newEntries[j].TableValue.Operation != memtable.Remove {
+			if newEntries[j].TableValue.Operation != Remove {
 				mergedEntries = append(mergedEntries, newEntries[j])
 			}
 			j++
@@ -303,7 +303,7 @@ func validateBTree(root *page) bool {
 		if head.Type() == Root || head.Type() == Index {
 			// read child pages to do validation
 			for _, entry := range head.AllEntries() {
-				addr := newAddress(entry.Value)
+				addr := chunk.NewAddress(entry.Value)
 				page := readPage(addr)
 				if page.content == nil {
 					return false

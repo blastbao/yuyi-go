@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package memtable
+package datastore
 
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"runtime"
 	"sort"
 	"sync"
@@ -135,24 +134,4 @@ func verifyPutResult(t *testing.T, skipList *SkipList, pairs []*KVPair) {
 	if i != len(pairs) {
 		t.Error("Failed to iterator skip list")
 	}
-}
-
-var defaultLetters = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-
-// RandomString returns a random string with a fixed length
-func randomBytes(n int, allowedChars ...[]rune) []byte {
-	var letters []rune
-
-	if len(allowedChars) == 0 {
-		letters = defaultLetters
-	} else {
-		letters = allowedChars[0]
-	}
-
-	b := make([]rune, n)
-	for i := range b {
-		b[i] = letters[rand.Intn(len(letters))]
-	}
-
-	return []byte(string(b))
 }

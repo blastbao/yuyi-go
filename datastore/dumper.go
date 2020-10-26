@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package btree
+package datastore
 
 import (
 	"fmt"
-	"yuyi-go/lsmtree/memtable"
+	"yuyi-go/datastore/chunk"
 )
 
 type dumper struct {
@@ -30,7 +30,7 @@ type dumper struct {
 	filter Filter
 
 	// cache the cache for page buffer that may be modified during dump
-	cache map[address]*pageForDump
+	cache map[chunk.Address]*pageForDump
 
 	// treeDepth the depth of the tree during dump
 	treeDepth int
@@ -42,14 +42,14 @@ type dumper struct {
 	indexPageSize int
 }
 
-func (dumper *dumper) Dump(entries []*memtable.KVEntry) *TreeInfo {
+func (dumper *dumper) Dump(entries []*KVEntry) *TreeInfo {
 	c := make(chan TreeInfo, 1)
 	go dumper.internalDump(entries, c)
 	res := <-c
 	return &res
 }
 
-func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo) {
+func (dumper *dumper) internalDump(entries []*KVEntry, c chan TreeInfo) {
 	var treeInfo TreeInfo
 	defer func() {
 		c <- treeInfo
@@ -57,14 +57,14 @@ func (dumper *dumper) internalDump(entries []*memtable.KVEntry, c chan TreeInfo)
 
 	ctx := &context{
 		path:      nil,
-		committed: map[int]map[address][]*pageForDump{},
+		committed: map[int]map[chunk.Address][]*pageForDump{},
 	}
 	lastIndex := 0
 	for i, entry := range entries {
-		if entry.TableValue.Operation == memtable.Put {
+		if entry.TableValue.Operation == Put {
 			continue
 		}
-		if entry.TableValue.Operation == memtable.Remove {
+		if entry.TableValue.Operation == Remove {
 			if i > lastIndex {
 				putEntries := entries[lastIndex:i:i]
 				dumper.putEntries(putEntries, ctx)
@@ -105,9 +105,9 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 				for _, splitPoint := range splitPoints {
 					newPage := dumper.splitPage(oldRoot, Index, startPoint, splitPoint)
 					// add new page's reference in root
-					newRoot.addKVPair(&memtable.KVPair{
+					newRoot.addKVPair(&KVPair{
 						Key:   newPage.Key(0),
-						Value: newPage.addr.Value(),
+						Value: newPage.addr.Bytes(),
 					})
 					// commit this page for writing
 					ctx.commitPage(newPage, newRoot.addr, 0)
@@ -134,8 +134,8 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 	}
 }
 
-func (dumper *dumper) putEntries(putEntries []*memtable.KVEntry, ctx *context) {
-	var rightSibling memtable.Key
+func (dumper *dumper) putEntries(putEntries []*KVEntry, ctx *context) {
+	var rightSibling Key
 	var path []*pathItemForDump
 	for _, entry := range putEntries {
 		// check path
@@ -161,7 +161,7 @@ func (dumper *dumper) putEntries(putEntries []*memtable.KVEntry, ctx *context) {
 	}
 }
 
-func (dumper *dumper) removeEntry(entry *memtable.KVEntry, ctx *context) {
+func (dumper *dumper) removeEntry(entry *KVEntry, ctx *context) {
 	if dumper.root == nil || !dumper.filter.MightContains(&entry.Key) {
 		return
 	}
@@ -184,7 +184,7 @@ func (dumper *dumper) removeEntry(entry *memtable.KVEntry, ctx *context) {
 	leafPage.removeKV(entry.Key)
 }
 
-func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []*pathItemForDump {
+func (dumper *dumper) fetchPathForDumper(root *pageForDump, key Key) []*pathItemForDump {
 	if root == nil || root.KVPairsCount() == 0 {
 		res := make([]*pathItemForDump, 2, 2)
 
@@ -210,7 +210,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []
 			}
 		}
 
-		root.addKVToIndex(key, leaf.addr.Value(), -1)
+		root.addKVToIndex(key, leaf.addr.Bytes(), -1)
 		res[0] = &pathItemForDump{root, 0}
 		dumper.cache[root.addr] = root
 
@@ -256,7 +256,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key memtable.Key) []
 	return res
 }
 
-func (dumper *dumper) fetchPageForDumper(addr address) *pageForDump {
+func (dumper *dumper) fetchPageForDumper(addr chunk.Address) *pageForDump {
 	content := ReadFrom(addr)
 	page := page{content: content, addr: addr}
 	pageForDump := &pageForDump{
@@ -270,7 +270,7 @@ func (dumper *dumper) fetchPageForDumper(addr address) *pageForDump {
 	return pageForDump
 }
 
-func (dumper *dumper) findRightSibling(path []*pathItemForDump) memtable.Key {
+func (dumper *dumper) findRightSibling(path []*pathItemForDump) Key {
 	// iterate from index to index
 	for i := len(path) - 2; i >= 0; i-- {
 		page := path[i].page
@@ -345,9 +345,9 @@ func (dumper *dumper) checkForSplit(ctx *context, level int, threshold int, newP
 	for _, splitPoint := range splitPoints {
 		newPage := dumper.splitPage(pathItem.page, pathItem.page.Type(), startPoint, splitPoint)
 		// add new page's reference in it's parent
-		path[level-1].page.addKVPair(&memtable.KVPair{
+		path[level-1].page.addKVPair(&KVPair{
 			Key:   newPage.mappingKey(),
-			Value: newPage.addr.Value(),
+			Value: newPage.addr.Bytes(),
 		})
 		// commit this page for writing
 		ctx.commitPage(newPage, path[level-1].page.addr, level)
@@ -365,7 +365,7 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 	// page size under threshold. Try to merge this page with it's right page of old path
 	if pathItem.index+1 < path[level-1].page.KVPairsCount() {
 		nextAddr := path[level-1].page.ChildAddress(pathItem.index + 1)
-		if newPath != nil && nextAddr.equals(newPath[level].page.addr) {
+		if newPath != nil && nextAddr.Equals(newPath[level].page.addr) {
 			// page of new path is the right page of old path, merge them together
 			leftCount := pathItem.page.KVPairsCount()
 			pathItem.page.appendKVEntries(newPath[level].page.AllEntries())
@@ -484,7 +484,7 @@ func (dumper *dumper) flush(ctx *context) {
 	for level := depth - 1; level >= 0; level-- {
 		for parentAddr, pages := range ctx.committed[level] {
 			var parent *pageForDump
-			if parentAddr.equals(dumper.root.addr) {
+			if parentAddr.Equals(dumper.root.addr) {
 				parent = dumper.root
 			} else {
 				parent = dumper.cache[parentAddr]
@@ -506,7 +506,7 @@ func (dumper *dumper) flush(ctx *context) {
 					parent.removeKV(page.shadowKey)
 					page.shadowKey = nil
 				}
-				parent.addKV(page.mappingKey(), addr.Value())
+				parent.addKV(page.mappingKey(), addr.Bytes())
 
 				dumper.decommissionPage(page)
 			}
@@ -516,16 +516,16 @@ func (dumper *dumper) flush(ctx *context) {
 	return
 }
 
-func (dumper *dumper) writePage(page *pageForDump) address {
+func (dumper *dumper) writePage(page *pageForDump) chunk.Address {
 	return writeTo(page.buildCompressedBytes())
 }
 
-func (dumper *dumper) writePages(pages []*pageForDump) []address {
-	addresses := make([]address, 0)
+func (dumper *dumper) writePages(pages []*pageForDump) []chunk.Address {
+	addrs := make([]chunk.Address, 0)
 	for _, page := range pages {
-		addresses = append(addresses, writeTo(page.buildCompressedBytes()))
+		addrs = append(addrs, writeTo(page.buildCompressedBytes()))
 	}
-	return addresses
+	return addrs
 }
 
 // context the context for b+ tree dump progress
@@ -534,10 +534,10 @@ type context struct {
 	path []*pathItemForDump
 	// committed the map to save parent/child relationship for the pages
 	// that are writable
-	committed map[int]map[address][]*pageForDump
+	committed map[int]map[chunk.Address][]*pageForDump
 }
 
-func (ctx *context) commitPage(page *pageForDump, parentAddr address, level int) {
+func (ctx *context) commitPage(page *pageForDump, parentAddr chunk.Address, level int) {
 	committedOnLevel := ctx.committedOnLevel(level)
 	if committedOnLevel[parentAddr] == nil {
 		committedOnLevel[parentAddr] = make([]*pageForDump, 0)
@@ -545,7 +545,7 @@ func (ctx *context) commitPage(page *pageForDump, parentAddr address, level int)
 	committedOnLevel[parentAddr] = append(committedOnLevel[parentAddr], page)
 }
 
-func (ctx *context) commitPages(pages []*pageForDump, parentAddr address, level int) {
+func (ctx *context) commitPages(pages []*pageForDump, parentAddr chunk.Address, level int) {
 	committedOnLevel := ctx.committedOnLevel(level)
 	if committedOnLevel[parentAddr] == nil {
 		committedOnLevel[parentAddr] = make([]*pageForDump, 0, len(pages))
@@ -553,9 +553,9 @@ func (ctx *context) commitPages(pages []*pageForDump, parentAddr address, level 
 	committedOnLevel[parentAddr] = append(committedOnLevel[parentAddr], pages...)
 }
 
-func (ctx *context) committedOnLevel(level int) map[address][]*pageForDump {
+func (ctx *context) committedOnLevel(level int) map[chunk.Address][]*pageForDump {
 	if ctx.committed[level] == nil {
-		ctx.committed[level] = map[address][]*pageForDump{}
+		ctx.committed[level] = map[chunk.Address][]*pageForDump{}
 	}
 	return ctx.committed[level]
 }

@@ -12,39 +12,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package memtable
+package datastore
 
-import "bytes"
-
-type OPERATION uint8
-
-const (
-	Put       OPERATION = 1
-	PutAbsent OPERATION = 2
-	Remove    OPERATION = 3
-	PageCopy  OPERATION = 4
-)
-
-type Key []byte
-
-type Value []byte
-
-type TableValue struct {
-	Operation OPERATION
-	Value     Value
+type MemTable struct {
+	skipList *SkipList
+	sealed   bool
+	capacity int32
 }
 
-type KVPair struct {
-	Key   Key
-	Value Value
+func NewMemTable() *MemTable {
+	skipList := NewSkipList()
+	return &MemTable{
+		skipList: skipList,
+		sealed:   false,
+		capacity: 0,
+	}
 }
 
-type KVEntry struct {
-	Key        Key
-	TableValue TableValue
-	Seq        uint64
+func (memTable *MemTable) Has(key Key, seq uint64) bool {
+	return memTable.skipList.Get(key, seq) != nil
 }
 
-func (key Key) Compare(another Key) int {
-	return bytes.Compare(key, another)
+func (memTable *MemTable) Get(key Key, seq uint64) *TableValue {
+	return memTable.skipList.Get(key, seq)
+}
+
+func (memTable *MemTable) List(start Key, end Key, seq uint64) *Iterator {
+	return memTable.skipList.NewIterator(start, end, seq)
 }

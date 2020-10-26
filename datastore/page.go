@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package btree
+package datastore
 
 import (
 	"bytes"
-	"yuyi-go/lsmtree/memtable"
+	"yuyi-go/datastore/chunk"
 	"yuyi-go/shared"
 )
 
@@ -46,19 +46,19 @@ const (
 // page the basic unit for a btree.
 type page struct {
 	content []byte
-	entries []*memtable.KVPair
-	addr    address
+	entries []*KVPair
+	addr    chunk.Address
 }
 
-func NewPage(pageType PageType, pairs []*memtable.KVPair) *page {
+func NewPage(pageType PageType, pairs []*KVPair) *page {
 	return &page{
-		content: createEmptyContent(pageType),
+		content: newEmptyContent(pageType),
 		entries: pairs,
-		addr:    newFakeAddr(),
+		addr:    chunk.NewFakeAddr(),
 	}
 }
 
-func createEmptyContent(pageType PageType) []byte {
+func newEmptyContent(pageType PageType) []byte {
 	var array [VersionSize + TypeSize + KVCountSize]byte
 	array[0] = Version1
 	array[1] = byte(pageType)
@@ -89,7 +89,7 @@ func (page *page) KVPairsCount() int {
 }
 
 // Search find the location with the specified key.
-func (page *page) Search(key *memtable.Key) int {
+func (page *page) Search(key *Key) int {
 	low := 0
 	high := page.KVPairsCount() - 1
 
@@ -109,7 +109,7 @@ func (page *page) Search(key *memtable.Key) int {
 }
 
 // Key get key in the page with the specified index
-func (page *page) Key(index int) memtable.Key {
+func (page *page) Key(index int) Key {
 	if page.entries != nil {
 		return page.entries[index].Key
 	}
@@ -126,7 +126,7 @@ func (page *page) Key(index int) memtable.Key {
 }
 
 // Value get value in the page with the specified index
-func (page *page) Value(index int) memtable.Value {
+func (page *page) Value(index int) Value {
 	if page.entries != nil {
 		return page.entries[index].Value
 	}
@@ -146,36 +146,36 @@ func (page *page) Value(index int) memtable.Value {
 }
 
 // address get the child page address in the page with the specified index
-func (page *page) ChildAddress(index int) address {
+func (page *page) ChildAddress(index int) chunk.Address {
 	value := page.Value(index)
-	return newAddress(value)
+	return chunk.NewAddress(value)
 }
 
 // KVPair get key/value pair in the page with the specified index
-func (page *page) KVPair(index int) *memtable.KVPair {
+func (page *page) KVPair(index int) *KVPair {
 	if page.entries != nil {
 		return page.entries[index]
 	}
-	return &memtable.KVPair{Key: page.Key(index), Value: page.Value(index)}
+	return &KVPair{Key: page.Key(index), Value: page.Value(index)}
 }
 
 // FloorEntry
-func (page *page) FloorEntry(key *memtable.Key) *memtable.KVPair {
+func (page *page) FloorEntry(key *Key) *KVPair {
 	return nil
 }
 
 // CeilingEntry
-func (page *page) CeilingEntry(key *memtable.Key) *memtable.KVPair {
+func (page *page) CeilingEntry(key *Key) *KVPair {
 	return nil
 }
 
 // AllEntries get all key-value entries of the page buffer
-func (page *page) AllEntries() []*memtable.KVPair {
+func (page *page) AllEntries() []*KVPair {
 	if page.entries == nil {
 		kvCount := page.KVPairsCount()
-		slice := make([]*memtable.KVPair, kvCount)
+		slice := make([]*KVPair, kvCount)
 		for i := 0; i < kvCount; i++ {
-			slice[i] = &memtable.KVPair{Key: page.Key(i), Value: page.Value(i)}
+			slice[i] = &KVPair{Key: page.Key(i), Value: page.Value(i)}
 		}
 		page.entries = slice
 	}
@@ -196,14 +196,14 @@ type pageForDump struct {
 	size int
 
 	// shadowKey the deleted mapping key
-	shadowKey memtable.Key
+	shadowKey Key
 }
 
-func NewPageForDump(pageType PageType, pairs []*memtable.KVPair) *pageForDump {
+func NewPageForDump(pageType PageType, pairs []*KVPair) *pageForDump {
 	page := page{
-		content: createEmptyContent(pageType),
+		content: newEmptyContent(pageType),
 		entries: pairs,
-		addr:    newFakeAddr(),
+		addr:    chunk.NewFakeAddr(),
 	}
 	return &pageForDump{
 		page:      page,
@@ -214,7 +214,7 @@ func NewPageForDump(pageType PageType, pairs []*memtable.KVPair) *pageForDump {
 	}
 }
 
-func (page *pageForDump) appendKVEntries(entriesToAppend []*memtable.KVPair) {
+func (page *pageForDump) appendKVEntries(entriesToAppend []*KVPair) {
 	// update entries of the page
 	for _, pair := range entriesToAppend {
 		page.entries = append(page.AllEntries(), pair)
@@ -223,7 +223,7 @@ func (page *pageForDump) appendKVEntries(entriesToAppend []*memtable.KVPair) {
 	page.dirty = true
 }
 
-func (page *pageForDump) addKVToIndex(key memtable.Key, value memtable.Value, index int) {
+func (page *pageForDump) addKVToIndex(key Key, value Value, index int) {
 	entries := page.AllEntries()
 	if index < 0 {
 		index = -index - 1
@@ -234,42 +234,42 @@ func (page *pageForDump) addKVToIndex(key memtable.Key, value memtable.Value, in
 		}
 		leftPart := entries[0:index:index]
 		right := entries[index:len(entries):len(entries)]
-		leftPart = append(leftPart, &memtable.KVPair{Key: key, Value: value})
+		leftPart = append(leftPart, &KVPair{Key: key, Value: value})
 		entries = append(leftPart, right...)
 	} else {
 		// update size of the page
 		page.size -= len(entries[index].Key) + len(entries[index].Value)
 		page.size += len(key) + len(value)
 
-		entries[index] = &memtable.KVPair{Key: key, Value: value}
+		entries[index] = &KVPair{Key: key, Value: value}
 	}
 	// update entries of the page
 	page.entries = entries
 	page.dirty = true
 }
 
-func (page *pageForDump) mappingKey() memtable.Key {
+func (page *pageForDump) mappingKey() Key {
 	if page.shadowKey != nil {
 		return page.shadowKey
 	}
 	return page.Key(0)
 }
 
-func (page *pageForDump) addKV(key memtable.Key, value memtable.Value) {
+func (page *pageForDump) addKV(key Key, value Value) {
 	index := page.Search(&key)
 	page.addKVToIndex(key, value, index)
 }
 
-func (page *pageForDump) addKVPair(pair *memtable.KVPair) {
+func (page *pageForDump) addKVPair(pair *KVPair) {
 	index := page.Search(&pair.Key)
 	page.addKVToIndex(pair.Key, pair.Value, index)
 }
 
-func (page *pageForDump) addKVEntryToIndex(entry *memtable.KVEntry, index int) {
+func (page *pageForDump) addKVEntryToIndex(entry *KVEntry, index int) {
 	page.addKVToIndex(entry.Key, entry.TableValue.Value, index)
 }
 
-func (page *pageForDump) removeKV(key memtable.Key) {
+func (page *pageForDump) removeKV(key Key) {
 	index := page.Search(&key)
 	if index >= 0 {
 		page.removeKVEntryFromIndex(index)
