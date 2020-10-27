@@ -16,59 +16,96 @@ package chunk
 
 import (
 	"hash/crc32"
-	"io"
 	"os"
 
 	"github.com/golang/snappy"
-	"github.com/google/uuid"
 )
 
-type crc32Reader struct {
-	chunk  uuid.UUID
-	writer io.Reader
+type ChunkReader interface {
+	Read(addr Address) (p []byte, err error)
 }
 
-func (r *crc32Reader) Read(p []byte) (n int, err error) {
-	chechsum := crc32.ChecksumIEEE(p)
+type btreeReader struct {
+	reader ChunkReader
+}
 
-	block := make([]byte, len(p)+16+4) // 16 length of uuid, 4 length of checksum
-	block = append(block, r.chunk[0:]...)
-	block = append(block, p...)
-	block = append(block, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum))
-	return r.writer.Read(block)
+func newBtreeReader() (*btreeReader, error) {
+	reader := newChainedReader()
+	return &btreeReader{
+		reader: reader,
+	}, nil
+}
+
+func (r *btreeReader) Read(addr Address) (p []byte, err error) {
+	return r.reader.Read(addr)
+}
+
+func newChainedReader() ChunkReader {
+	return &crc32Reader{
+		reader: &snappyReader{
+			reader: &fileReader{},
+		},
+	}
+}
+
+type crc32Reader struct {
+	reader ChunkReader
+}
+
+func (r *crc32Reader) Read(addr Address) (p []byte, err error) {
+	p, err = r.reader.Read(addr)
+	if err != nil {
+		return nil, err
+	}
+	// validate crc32 checksum
+	len := len(p)
+	chechsum := crc32.ChecksumIEEE(p[0 : len-4])
+	if p[len-4] != byte(chechsum>>24) || p[len-3] != byte(chechsum>>16) ||
+		p[len-2] != byte(chechsum>>8) || p[len-1] != byte(chechsum) {
+		return nil, CheckSumError{msg: "Invalid checksum"}
+	}
+
+	return p[0 : len-4 : len-4], nil
 }
 
 type snappyReader struct {
-	r io.Reader
+	reader ChunkReader
 }
 
-func (r *snappyReader) Read(p []byte) (n int, err error) {
-	_, err = r.Read(p)
+func (r *snappyReader) Read(addr Address) (p []byte, err error) {
+	var block []byte
+	block, err = r.reader.Read(addr)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	_, err = snappy.Decode(p, p)
+	p, err = snappy.Decode(nil, block)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return len(p), nil
+	return p, nil
 }
 
-type fileReader struct {
-	addr Address
-}
+type fileReader struct{}
 
-func (r *fileReader) Read(p []byte) (n int, err error) {
-	addr := r.addr
+func (r *fileReader) Read(addr Address) (p []byte, err error) {
 	file, err := os.Open(chunkFileName(addr.Chunk))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer file.Close()
 
+	p = make([]byte, addr.Length)
 	_, err = file.ReadAt(p, int64(addr.Offset))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return len(p), nil
+	return p, nil
+}
+
+type CheckSumError struct {
+	msg string
+}
+
+func (err CheckSumError) Error() string {
+	return err.msg
 }

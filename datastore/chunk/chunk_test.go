@@ -15,6 +15,7 @@
 package chunk
 
 import (
+	"bytes"
 	"math/rand"
 	"os"
 	"testing"
@@ -31,7 +32,8 @@ func TestReaderAndWriter(t *testing.T) {
 		return
 	}
 
-	count := 100
+	// write to chunk
+	count := 200
 	inputs := make([][]byte, count)
 	addrs := make([]Address, count)
 	for i := 0; i < count; i++ {
@@ -43,6 +45,24 @@ func TestReaderAndWriter(t *testing.T) {
 		}
 		inputs[i] = input
 		addrs[i] = addr
+	}
+
+	// read from chunk
+	reader, err := newBtreeReader()
+	if err != nil {
+		t.Error("Failed to create reader")
+		return
+	}
+	for i, addr := range addrs {
+		block, err := reader.Read(addr)
+		if err != nil {
+			t.Error("Failed to read address ", addr)
+			return
+		}
+		if bytes.Compare(inputs[i], block) != 0 {
+			t.Error("block read from addr mismatch ", addr)
+			return
+		}
 	}
 }
 

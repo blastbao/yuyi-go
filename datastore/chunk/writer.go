@@ -20,7 +20,6 @@ import (
 	"os"
 
 	"github.com/golang/snappy"
-	"github.com/google/uuid"
 )
 
 type ChunkWrtier interface {
@@ -105,18 +104,13 @@ func newChainedWriter(c *chunk) io.Writer {
 }
 
 type crc32Writer struct {
-	chunk  uuid.UUID
 	writer io.Writer
 }
 
 func (w *crc32Writer) Write(p []byte) (n int, err error) {
 	chechsum := crc32.ChecksumIEEE(p)
-
-	block := make([]byte, len(p)+16+4) // 16 length of uuid, 4 length of checksum
-	block = append(block, w.chunk[0:]...)
-	block = append(block, p...)
-	block = append(block, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum))
-	return w.writer.Write(block)
+	p = append(p, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum))
+	return w.writer.Write(p)
 }
 
 type snappyWriter struct {

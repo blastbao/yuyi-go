@@ -24,7 +24,7 @@ import (
 var (
 	// maxCapacity set max capacity of each file to 512k
 	maxCapacity = 512 * 1024
-	folder      = "/tmp/yuyi"
+	folder      = os.TempDir()
 )
 
 type chunk struct {
