@@ -21,10 +21,10 @@ import (
 	"github.com/google/uuid"
 )
 
-const (
+var (
 	// maxCapacity set max capacity of each file to 512k
 	maxCapacity = 512 * 1024
-	folder      = "./tmp/"
+	folder      = "/tmp/yuyi"
 )
 
 type chunk struct {
@@ -45,7 +45,7 @@ func newChunk() (*chunk, error) {
 	}
 	// Todo: write metadata for the chunk
 	c := &chunk{
-		name:        uuid.New(),
+		name:        name,
 		createdTime: time.Now().UnixNano(),
 		capacity:    maxCapacity,
 		sealed:      false,
@@ -54,5 +54,5 @@ func newChunk() (*chunk, error) {
 }
 
 func chunkFileName(name uuid.UUID) string {
-	return folder + name.String()
+	return folder + "/" + name.String()
 }

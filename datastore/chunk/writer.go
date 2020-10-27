@@ -17,7 +17,7 @@ package chunk
 import (
 	"hash/crc32"
 	"io"
-	"io/ioutil"
+	"os"
 
 	"github.com/golang/snappy"
 	"github.com/google/uuid"
@@ -63,7 +63,7 @@ func (w *btreeWriter) Write(p []byte) (addr Address, err error) {
 			return addr, err
 		}
 	}
-	_, err = w.writer.Write(p)
+	written, err := w.writer.Write(p)
 	if err != nil {
 		err2 := w.rotate()
 		if err != nil {
@@ -74,9 +74,9 @@ func (w *btreeWriter) Write(p []byte) (addr Address, err error) {
 	addr = Address{
 		Chunk:  w.chunk.name,
 		Offset: w.offset,
-		Length: len,
+		Length: written,
 	}
-	w.offset += len
+	w.offset += written
 	return addr, nil
 }
 
@@ -133,9 +133,17 @@ type fileWriter struct {
 }
 
 func (w *fileWriter) Write(p []byte) (n int, err error) {
-	err = ioutil.WriteFile(w.file, p, 0666)
+	var f *os.File
+	f, err = os.OpenFile(w.file, os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
 		return 0, err
 	}
-	return len(p), nil
+	n, err = f.Write(p)
+	if err1 := f.Close(); err == nil {
+		err = err1
+	}
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
