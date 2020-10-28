@@ -26,15 +26,28 @@ import (
 var entriesCount = 2000
 
 func TestPutEntries(t *testing.T) {
-	btree := &BTree{}
+	btree, err := NewEmptyBTree()
+	if err != nil {
+		t.Error("Create empty btree failed")
+		return
+	}
 	allEntries := make([]*KVEntry, 0)
 outer:
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 10; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper := newDumper(btree)
-		btree.lastTreeInfo = dumper.Dump(entries)
-		if !validateBTree(btree.lastTreeInfo.root) {
+		dumper, err := newDumper(btree)
+		if err != nil {
+			t.Error("new dumper failed")
+			return
+		}
+		treeInfo, err := dumper.Dump(entries)
+		if err != nil {
+			t.Error("btree dump failed")
+			break outer
+		}
+		btree.lastTreeInfo = treeInfo
+		if !validateBTree(btree) {
 			t.Error("tree invalid\n")
 			break outer
 		}
@@ -44,7 +57,11 @@ outer:
 		// do list
 		var start Key
 		for {
-			listRes := btree.List(start, nil, 1000)
+			listRes, err := btree.List(start, nil, 1000)
+			if err != nil {
+				t.Error("btree list failed")
+				break outer
+			}
 			for _, pair := range listRes.pairs {
 				if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
 					t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
@@ -61,22 +78,44 @@ outer:
 }
 
 func TestPutAndRemoveEntries(t *testing.T) {
-	btree := &BTree{}
+	btree, err := NewEmptyBTree()
+	if err != nil {
+		t.Error("Create empty btree failed")
+		return
+	}
 	allEntries := make([]*KVEntry, 0)
 
 	// init with 2000 put entries
 	entries := randomPutKVEntries(entriesCount)
 	allEntries = mergeEntries(allEntries, entries)
-	dumper := newDumper(btree)
-	btree.lastTreeInfo = dumper.Dump(entries)
+	dumper, err := newDumper(btree)
+	if err != nil {
+		t.Error("new dumper failed")
+		return
+	}
+	treeInfo, err := dumper.Dump(entries)
+	if err != nil {
+		t.Error("btree dump failed")
+		return
+	}
+	btree.lastTreeInfo = treeInfo
 outer:
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 10; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper := newDumper(btree)
-		btree.lastTreeInfo = dumper.Dump(entries)
-		if !validateBTree(btree.lastTreeInfo.root) {
-			t.Error("tree invalid\n")
+		dumper, err := newDumper(btree)
+		if err != nil {
+			t.Error("new dumper failed")
+			return
+		}
+		treeInfo, err := dumper.Dump(entries)
+		if err != nil {
+			t.Error("btree dump failed ")
+			break outer
+		}
+		btree.lastTreeInfo = treeInfo
+		if !validateBTree(btree) {
+			t.Error("tree invalid")
 			break outer
 		}
 		fmt.Printf("Finish dump round %d\n", i)
@@ -85,7 +124,11 @@ outer:
 		// do list
 		var start Key
 		for {
-			listRes := btree.List(start, nil, 1000)
+			listRes, err := btree.List(start, nil, 1000)
+			if err != nil {
+				t.Error("btree list failed")
+				break outer
+			}
 			for _, pair := range listRes.pairs {
 				if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
 					t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
@@ -102,14 +145,26 @@ outer:
 }
 
 func TestPutAndRemoveAll(t *testing.T) {
-	btree := &BTree{}
-	var dumper *dumper
+	btree, err := NewEmptyBTree()
+	if err != nil {
+		t.Error("Create empty btree failed")
+		return
+	}
 
-	for i := 0; i < 20; i++ {
+	for i := 0; i < 10; i++ {
 		// put entries
 		entries := randomPutKVEntries(entriesCount)
-		dumper = newDumper(btree)
-		btree.lastTreeInfo = dumper.Dump(entries)
+		dumper, err := newDumper(btree)
+		if err != nil {
+			t.Error("new dumper failed")
+			return
+		}
+		treeInfo, err := dumper.Dump(entries)
+		if err != nil {
+			t.Error("btree dump failed")
+			return
+		}
+		btree.lastTreeInfo = treeInfo
 
 		// remove entries
 		for _, entry := range entries {
@@ -118,10 +173,23 @@ func TestPutAndRemoveAll(t *testing.T) {
 				Value:     nil,
 			}
 		}
-		dumper = newDumper(btree)
-		btree.lastTreeInfo = dumper.Dump(entries)
+		dumper, err = newDumper(btree)
+		if err != nil {
+			t.Error("new dumper failed")
+			return
+		}
+		treeInfo, err = dumper.Dump(entries)
+		if err != nil {
+			t.Error("btree dump failed")
+			return
+		}
+		btree.lastTreeInfo = treeInfo
 
-		listRes := btree.List(nil, nil, 1000)
+		listRes, err2 := btree.List(nil, nil, 1000)
+		if err2 != nil {
+			t.Error("btree list failed")
+			return
+		}
 		if len(listRes.pairs) != 0 {
 			t.Error("tree is not empty")
 			break
@@ -249,7 +317,9 @@ func randomBytes(n int, allowedChars ...[]rune) []byte {
 	return []byte(string(b))
 }
 
-func validateBTree(root *page) bool {
+func validateBTree(btree *BTree) bool {
+	root := btree.lastTreeInfo.root
+
 	queue := make([]*page, 1)
 	queue[0] = root
 
@@ -270,7 +340,10 @@ func validateBTree(root *page) bool {
 			// read child pages to do validation
 			for _, entry := range head.AllEntries() {
 				addr := chunk.NewAddress(entry.Value)
-				page := readPage(addr)
+				page, err := btree.readPage(addr)
+				if err != nil {
+					return false
+				}
 				if page.content == nil {
 					return false
 				}

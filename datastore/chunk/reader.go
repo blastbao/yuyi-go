@@ -29,7 +29,7 @@ type btreeReader struct {
 	reader ChunkReader
 }
 
-func newBtreeReader() (*btreeReader, error) {
+func NewBtreeReader() (*btreeReader, error) {
 	reader := newChainedReader()
 	return &btreeReader{
 		reader: reader,

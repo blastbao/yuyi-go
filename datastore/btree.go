@@ -22,6 +22,21 @@ type BTree struct {
 
 	// dumper the dumper handler for persist new entries
 	dumper *dumper
+
+	// reader the reader utils to read pages from chunk
+	reader chunk.ChunkReader
+}
+
+func NewEmptyBTree() (*BTree, error) {
+	reader, err := chunk.NewBtreeReader()
+	if err != nil {
+		return nil, err
+	}
+	return &BTree{
+		lastTreeInfo: nil,
+		dumper:       nil,
+		reader:       reader,
+	}, nil
 }
 
 type TreeInfo struct {
@@ -45,35 +60,40 @@ type pathItemForDump struct {
 	index int
 }
 
-func (tree *BTree) Has(key *Key) bool {
+func (tree *BTree) Has(key *Key) (bool, error) {
 	treeInfo := tree.lastTreeInfo
 	skipRead := !mightContains(treeInfo, key)
 	if skipRead {
-		return false
+		return false, nil
 	}
 
 	// fetch the path with the specified key
-	path := tree.findPath(treeInfo, key)
+	path, err := tree.findPath(treeInfo, key)
+	if err != nil {
+		return false, err
+	}
 	leaf := path[len(path)-1].page
-	return leaf.Search(key) >= 0
+	return leaf.Search(key) >= 0, nil
 }
 
-func (tree *BTree) Get(key *Key) Value {
+func (tree *BTree) Get(key *Key) (Value, error) {
 	treeInfo := tree.lastTreeInfo
 	skipRead := !mightContains(treeInfo, key)
 	if skipRead {
-		return nil
+		return nil, nil
 	}
 
 	// fetch the path with the specified key
-	path := tree.findPath(treeInfo, key)
-
+	path, err := tree.findPath(treeInfo, key)
+	if err != nil {
+		return nil, err
+	}
 	leaf := path[len(path)-1].page
 	index := leaf.Search(key)
 	if index >= 0 {
-		return leaf.Value(index)
+		return leaf.Value(index), nil
 	} else {
-		return nil
+		return nil, nil
 	}
 }
 
@@ -82,13 +102,13 @@ type ListResult struct {
 	next  *Key
 }
 
-func (tree *BTree) List(start Key, end Key, max int) *ListResult {
+func (tree *BTree) List(start Key, end Key, max int) (*ListResult, error) {
 	treeInfo := tree.lastTreeInfo
 	if treeInfo == nil || treeInfo.root == nil || treeInfo.root.KVPairsCount() == 0 {
 		return &ListResult{
 			pairs: []*KVPair{},
 			next:  nil,
-		}
+		}, nil
 	}
 
 	res := make([]*KVPair, 0, max)
@@ -96,11 +116,14 @@ func (tree *BTree) List(start Key, end Key, max int) *ListResult {
 		start = []byte{}
 	}
 
-	path := tree.findPath(tree.lastTreeInfo, &start)
+	path, err := tree.findPath(tree.lastTreeInfo, &start)
+	if err != nil {
+		return nil, err
+	}
 	leaf := path[len(path)-1].page
 	pairsCount := leaf.KVPairsCount()
 	if pairsCount == 0 {
-		return &ListResult{make([]*KVPair, 0), nil}
+		return &ListResult{make([]*KVPair, 0), nil}, nil
 	}
 
 	startIndex := leaf.Search(&start)
@@ -125,7 +148,10 @@ outer:
 			keyFound++
 		}
 		// try find next leaf page
-		path = tree.findNextLeaf(path)
+		path, err := tree.findNextLeaf(path)
+		if err != nil {
+			return nil, err
+		}
 		if path == nil {
 			// reach end of the tree
 			break
@@ -134,7 +160,7 @@ outer:
 		pairsCount = leaf.KVPairsCount()
 		startIndex = 0
 	}
-	return &ListResult{res, &next}
+	return &ListResult{res, &next}, nil
 }
 
 func (tree *BTree) ReverseList(start Key, end Key, max int) []KVPair {
@@ -142,7 +168,7 @@ func (tree *BTree) ReverseList(start Key, end Key, max int) []KVPair {
 }
 
 // findPath find the path from root page to leaf page with the specified key
-func (tree *BTree) findPath(treeInfo *TreeInfo, key *Key) []*pathItem {
+func (tree *BTree) findPath(treeInfo *TreeInfo, key *Key) ([]*pathItem, error) {
 	root := treeInfo.root
 	// create result slice and put root to the result
 	res := make([]*pathItem, treeInfo.depth, treeInfo.depth)
@@ -161,7 +187,10 @@ func (tree *BTree) findPath(treeInfo *TreeInfo, key *Key) []*pathItem {
 		}
 		// find child page with the found index and push it in result.
 		childAddress := parent.ChildAddress(index)
-		childPage := readPage(childAddress)
+		childPage, err := tree.readPage(childAddress)
+		if err != nil {
+			return nil, err
+		}
 		res[depth] = &pathItem{childPage, index}
 
 		if childPage.Type() == Leaf {
@@ -172,16 +201,19 @@ func (tree *BTree) findPath(treeInfo *TreeInfo, key *Key) []*pathItem {
 			depth++
 		}
 	}
-	return res
+	return res, nil
 }
 
-func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
+func (tree *BTree) findNextLeaf(curPath []*pathItem) ([]*pathItem, error) {
 	depth := len(curPath)
 	// recusive find next index
 	i := depth - 1
 	for ; i > 0; i-- {
 		if curPath[i].index+1 < curPath[i-1].page.KVPairsCount() {
-			nextLeaf := readPage(curPath[i-1].page.ChildAddress(curPath[i].index + 1))
+			nextLeaf, err := tree.readPage(curPath[i-1].page.ChildAddress(curPath[i].index + 1))
+			if err != nil {
+				return nil, err
+			}
 			curPath[i] = &pathItem{nextLeaf, curPath[i].index + 1}
 			break
 		} else {
@@ -190,7 +222,7 @@ func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
 	}
 	if curPath[1] == nil {
 		// reach end of the tree
-		return nil
+		return nil, nil
 	}
 	for {
 		if curPath[i].page.Type() == Leaf {
@@ -198,15 +230,30 @@ func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
 		}
 		// find child page with the found index and push it in result.
 		childAddress := curPath[i].page.ChildAddress(0)
-		childPage := readPage(childAddress)
+		childPage, err := tree.readPage(childAddress)
+		if err != nil {
+			return nil, err
+		}
 		curPath[i+1] = &pathItem{childPage, 0}
 		i++
 	}
-	return curPath
+	return curPath, nil
 }
 
-func (btree *BTree) isDumping() bool {
-	return btree.dumper != nil
+func (tree *BTree) readPage(addr chunk.Address) (*page, error) {
+	content, err := tree.reader.Read(addr)
+	if err != nil {
+		return nil, err
+	}
+	return &page{
+		content: content,
+		entries: nil,
+		addr:    addr,
+	}, nil
+}
+
+func (tree *BTree) isDumping() bool {
+	return tree.dumper != nil
 }
 
 func mightContains(treeInfo *TreeInfo, key *Key) bool {
@@ -214,13 +261,4 @@ func mightContains(treeInfo *TreeInfo, key *Key) bool {
 		return false
 	}
 	return true
-}
-
-func readPage(addr chunk.Address) *page {
-	content := ReadFrom(addr)
-	return &page{
-		content: content,
-		entries: nil,
-		addr:    addr,
-	}
 }

@@ -31,18 +31,20 @@ var (
 )
 
 func init() {
-	for {
-		select {
-		case <-done:
-			ticker.Stop()
-			return
-		case <-ticker.C:
-			for _, store := range stores {
-				// check if the store should do flushing
-				store.checkForFlushing()
+	go func() {
+		for {
+			select {
+			case <-done:
+				ticker.Stop()
+				return
+			case <-ticker.C:
+				for _, store := range stores {
+					// check if the store should do flushing
+					store.checkForFlushing()
+				}
 			}
 		}
-	}
+	}()
 }
 
 type DataStore struct {
@@ -76,43 +78,43 @@ func (store *DataStore) Remove(key Key) {
 	return
 }
 
-func (store *DataStore) Has(key Key) bool {
+func (store *DataStore) Has(key Key) (bool, error) {
 	seq := store.seq
 	value := store.activeMemTable.Get(key, seq)
 	if value != nil {
 		if value.Operation == Remove {
-			return false
+			return false, nil
 		}
-		return true
+		return true, nil
 	}
 	for _, table := range store.sealedMemTables {
 		value := table.Get(key, maxSeq)
 		if value != nil {
 			if value.Operation == Remove {
-				return false
+				return false, nil
 			}
-			return true
+			return true, nil
 		}
 	}
 	return store.btree.Has(&key)
 }
 
-func (store *DataStore) Get(key Key) Value {
+func (store *DataStore) Get(key Key) (Value, error) {
 	seq := store.seq
 	value := store.activeMemTable.Get(key, seq)
 	if value != nil {
 		if value.Operation == Remove {
-			return nil
+			return nil, nil
 		}
-		return value.Value
+		return value.Value, nil
 	}
 	for _, table := range store.sealedMemTables {
 		value := table.Get(key, maxSeq)
 		if value != nil {
 			if value.Operation == Remove {
-				return nil
+				return nil, nil
 			}
-			return value.Value
+			return value.Value, nil
 		}
 	}
 	return store.btree.Get(&key)
@@ -153,8 +155,16 @@ func (store *DataStore) shouldFlush() bool {
 func (store *DataStore) flush() {
 	sealed := store.sealedMemTables[0:]
 
-	dumper := newDumper(store.btree)
-	store.btree.lastTreeInfo = dumper.Dump(mergeMemTables(sealed))
+	dumper, err := newDumper(store.btree)
+	if err != nil {
+		// log error log
+	}
+
+	treeInfo, err := dumper.Dump(mergeMemTables(sealed))
+	if err != nil {
+		// log error log
+	}
+	store.btree.lastTreeInfo = treeInfo
 }
 
 func mergeMemTables(tables []*MemTable) []*KVEntry {

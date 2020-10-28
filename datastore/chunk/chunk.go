@@ -54,5 +54,5 @@ func newChunk() (*chunk, error) {
 }
 
 func chunkFileName(name uuid.UUID) string {
-	return folder + "/" + name.String()
+	return folder + string(os.PathSeparator) + name.String()
 }

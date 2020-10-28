@@ -32,7 +32,7 @@ type btreeWriter struct {
 	writer io.Writer
 }
 
-func newBtreeWriter() (*btreeWriter, error) {
+func NewBtreeWriter() (*btreeWriter, error) {
 	c, err := newChunk()
 	if err != nil {
 		return nil, err

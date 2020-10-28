@@ -16,7 +16,7 @@ func TestIndexPage(t *testing.T) {
 		size:      0,
 		shadowKey: nil,
 	}
-	content := pageForDump.buildCompressedBytes()
+	content := pageForDump.buildBytes()
 
 	page := &page{
 		content: content,

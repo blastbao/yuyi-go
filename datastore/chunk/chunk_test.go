@@ -48,7 +48,7 @@ func TestReaderAndWriter(t *testing.T) {
 	}
 
 	// read from chunk
-	reader, err := newBtreeReader()
+	reader, err := NewBtreeReader()
 	if err != nil {
 		t.Error("Failed to create reader")
 		return

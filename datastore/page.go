@@ -290,7 +290,7 @@ func (page *pageForDump) removeKVEntryFromIndex(index int) {
 	page.dirty = true
 }
 
-func (page *pageForDump) buildCompressedBytes() []byte {
+func (page *pageForDump) buildBytes() []byte {
 	if !page.dirty {
 		return page.content
 	}

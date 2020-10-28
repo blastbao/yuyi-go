@@ -30,6 +30,9 @@ type dumper struct {
 	// filter the filter of btree
 	filter Filter
 
+	// writer the writer for btree pages
+	writer chunk.ChunkWrtier
+
 	// cache the cache for page buffer that may be modified during dump
 	cache map[chunk.Address]*pageForDump
 
@@ -43,9 +46,13 @@ type dumper struct {
 	indexPageSize int
 }
 
-func newDumper(btree *BTree) *dumper {
+func newDumper(btree *BTree) (*dumper, error) {
 	var root pageForDump
 	var depth int
+	writer, err := chunk.NewBtreeWriter()
+	if err != nil {
+		return nil, err
+	}
 	if btree.lastTreeInfo != nil && btree.lastTreeInfo.root != nil {
 		page := btree.lastTreeInfo.root
 		root = pageForDump{
@@ -60,36 +67,26 @@ func newDumper(btree *BTree) *dumper {
 			btree:         btree,
 			root:          &root,
 			filter:        &dummyFilter{},
+			writer:        writer,
 			cache:         map[chunk.Address]*pageForDump{},
 			treeDepth:     depth,
 			leafPageSize:  8192,
 			indexPageSize: 8192,
-		}
+		}, nil
 	}
 	return &dumper{
 		btree:         btree,
 		root:          nil,
 		filter:        &dummyFilter{},
+		writer:        writer,
 		cache:         map[chunk.Address]*pageForDump{},
 		treeDepth:     0,
 		leafPageSize:  8192,
 		indexPageSize: 8192,
-	}
+	}, nil
 }
 
-func (dumper *dumper) Dump(entries []*KVEntry) *TreeInfo {
-	c := make(chan TreeInfo, 1)
-	go dumper.internalDump(entries, c)
-	res := <-c
-	return &res
-}
-
-func (dumper *dumper) internalDump(entries []*KVEntry, c chan TreeInfo) {
-	var treeInfo TreeInfo
-	defer func() {
-		c <- treeInfo
-	}()
-
+func (dumper *dumper) Dump(entries []*KVEntry) (*TreeInfo, error) {
 	ctx := &context{
 		path:      nil,
 		committed: map[int]map[chunk.Address][]*pageForDump{},
@@ -122,10 +119,10 @@ func (dumper *dumper) internalDump(entries []*KVEntry, c chan TreeInfo) {
 	}
 
 	// handle root split and sync
-	treeInfo = *dumper.sync(ctx)
+	return dumper.sync(ctx)
 }
 
-func (dumper *dumper) sync(ctx *context) *TreeInfo {
+func (dumper *dumper) sync(ctx *context) (*TreeInfo, error) {
 	for {
 		if dumper.root.size > dumper.indexPageSize {
 			splitPoints := dumper.calculateSplitPoints(dumper.root, dumper.indexPageSize)
@@ -157,26 +154,38 @@ func (dumper *dumper) sync(ctx *context) *TreeInfo {
 	}
 
 	// flush root
-	dumper.root.addr = dumper.writePage(dumper.root)
+	var err error
+	dumper.root.addr, err = dumper.writePage(dumper.root)
+	if err != nil {
+		return nil, err
+	}
 	if dumper.root.KVPairsCount() == 0 {
 		dumper.treeDepth = 1
 	}
 
+	rootPage, err := dumper.btree.readPage(dumper.root.addr)
+	if err != nil {
+		return nil, err
+	}
 	return &TreeInfo{
-		root:   readPage(dumper.root.addr),
+		root:   rootPage,
 		depth:  dumper.treeDepth,
 		filter: &dummyFilter{},
-	}
+	}, nil
 }
 
-func (dumper *dumper) putEntries(putEntries []*KVEntry, ctx *context) {
+func (dumper *dumper) putEntries(putEntries []*KVEntry, ctx *context) error {
 	var rightSibling Key
 	var path []*pathItemForDump
+	var err error
 	for _, entry := range putEntries {
 		// check path
 		if path == nil || (rightSibling != nil && rightSibling.Compare(entry.Key) <= 0) {
 			// need fetch path cause origin path is nil/invalid
-			path = dumper.fetchPathForDumper(dumper.root, entry.Key)
+			path, err = dumper.fetchPathForDumper(dumper.root, entry.Key)
+			if err != nil {
+				return err
+			}
 
 			// check with new path to commit pages that is writable
 			dumper.checkForCommit(ctx, path)
@@ -194,13 +203,17 @@ func (dumper *dumper) putEntries(putEntries []*KVEntry, ctx *context) {
 		}
 		leafPage.addKVEntryToIndex(entry, index)
 	}
+	return nil
 }
 
-func (dumper *dumper) removeEntry(entry *KVEntry, ctx *context) {
+func (dumper *dumper) removeEntry(entry *KVEntry, ctx *context) error {
 	if dumper.root == nil || !dumper.filter.MightContains(&entry.Key) {
-		return
+		return nil
 	}
-	path := dumper.fetchPathForDumper(dumper.root, entry.Key)
+	path, err := dumper.fetchPathForDumper(dumper.root, entry.Key)
+	if err != nil {
+		return err
+	}
 	if path != nil {
 		// check with new path to commit pages that is writable
 		dumper.checkForCommit(ctx, path)
@@ -210,16 +223,17 @@ func (dumper *dumper) removeEntry(entry *KVEntry, ctx *context) {
 	leafPage := path[len(path)-1].page
 	index := leafPage.Search(&entry.Key)
 	if index < 0 {
-		return
+		return err
 	}
 	// key exists update filter first
 	dumper.filter.Remove(&entry.Key)
 
 	// modify page's content
 	leafPage.removeKV(entry.Key)
+	return nil
 }
 
-func (dumper *dumper) fetchPathForDumper(root *pageForDump, key Key) []*pathItemForDump {
+func (dumper *dumper) fetchPathForDumper(root *pageForDump, key Key) ([]*pathItemForDump, error) {
 	if root == nil || root.KVPairsCount() == 0 {
 		res := make([]*pathItemForDump, 2, 2)
 
@@ -251,7 +265,7 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key Key) []*pathItem
 
 		dumper.root = root
 		dumper.treeDepth = 2
-		return res
+		return res, nil
 	}
 	res := make([]*pathItemForDump, dumper.treeDepth, dumper.treeDepth)
 	res[0] = &pathItemForDump{root, 0}
@@ -270,10 +284,14 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key Key) []*pathItem
 		// find child page with the found index and push it in result.
 		childAddr := parent.ChildAddress(index)
 		var childPage *pageForDump
+		var err error
 		if dumper.cache[childAddr] != nil {
 			childPage = dumper.cache[childAddr]
 		} else {
-			childPage = dumper.fetchPageForDumper(childAddr)
+			childPage, err = dumper.fetchPageForDumper(childAddr)
+			if err != nil {
+				return nil, err
+			}
 		}
 		res[depth] = &pathItemForDump{
 			page:  childPage,
@@ -288,11 +306,14 @@ func (dumper *dumper) fetchPathForDumper(root *pageForDump, key Key) []*pathItem
 			depth++
 		}
 	}
-	return res
+	return res, nil
 }
 
-func (dumper *dumper) fetchPageForDumper(addr chunk.Address) *pageForDump {
-	content := ReadFrom(addr)
+func (dumper *dumper) fetchPageForDumper(addr chunk.Address) (*pageForDump, error) {
+	content, err := dumper.btree.reader.Read(addr)
+	if err != nil {
+		return nil, err
+	}
 	page := page{content: content, addr: addr}
 	pageForDump := &pageForDump{
 		page:      page,
@@ -302,7 +323,7 @@ func (dumper *dumper) fetchPageForDumper(addr chunk.Address) *pageForDump {
 		shadowKey: nil,
 	}
 	dumper.cache[addr] = pageForDump
-	return pageForDump
+	return pageForDump, nil
 }
 
 func (dumper *dumper) findRightSibling(path []*pathItemForDump) Key {
@@ -394,7 +415,7 @@ func (dumper *dumper) checkForSplit(ctx *context, level int, threshold int, newP
 	}
 }
 
-func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newPath []*pathItemForDump) {
+func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newPath []*pathItemForDump) error {
 	path := ctx.path
 	pathItem := path[level]
 	// page size under threshold. Try to merge this page with it's right page of old path
@@ -415,7 +436,11 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 			}
 		} else {
 			// read right page of old path and merge them together
-			nextPage := readPage(nextAddr)
+			nextPage, err := dumper.btree.readPage(nextAddr)
+			if err != nil {
+				return err
+			}
+
 			pathItem.page.appendKVEntries(nextPage.AllEntries())
 			path[level-1].page.removeKV(nextPage.Key(0))
 			if newPath != nil && path[level-1].page == newPath[level-1].page {
@@ -428,16 +453,19 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 				ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
 			}
 		}
-		return
+		return nil
 	} else if pathItem.index > 1 {
 		// can't merge with right page of old path. Try left page
 		prevAddr := path[level-1].page.ChildAddress(pathItem.index - 1)
 		if dumper.cache[prevAddr] != nil {
 			// prevPage already in cache, and must already committed, should not change it.
 			ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
-			return
+			return nil
 		}
-		prevPage := dumper.fetchPageForDumper(prevAddr)
+		prevPage, err := dumper.fetchPageForDumper(prevAddr)
+		if err != nil {
+			return err
+		}
 		prevPage.appendKVEntries(pathItem.page.AllEntries())
 		// remove reference for the merged page
 		if pathItem.page.Type() == Index {
@@ -459,11 +487,12 @@ func (dumper *dumper) checkForMerge(ctx *context, level int, threshold int, newP
 		} else {
 			ctx.commitPage(prevPage, path[level-1].page.addr, level)
 		}
-		return
+		return nil
 	} else {
 		// commit this page for writing
 		ctx.commitPage(pathItem.page, path[level-1].page.addr, level)
 	}
+	return nil
 }
 
 func (dumper *dumper) calculateSplitPoints(page *pageForDump, threshold int) []int {
@@ -513,7 +542,7 @@ func (dumper *dumper) splitPage(page *pageForDump, pageType PageType, start int,
 	return page
 }
 
-func (dumper *dumper) flush(ctx *context) {
+func (dumper *dumper) flush(ctx *context) error {
 	// flush writable page from bottom to up, leaf to index
 	depth := dumper.treeDepth
 	for level := depth - 1; level >= 0; level-- {
@@ -534,7 +563,11 @@ func (dumper *dumper) flush(ctx *context) {
 					dumper.decommissionPage(page)
 				}
 			}
-			for i, addr := range dumper.writePages(pagesForWrite) {
+			addrs, err := dumper.writePages(pagesForWrite)
+			if err != nil {
+				return err
+			}
+			for i, addr := range addrs {
 				page := pages[i]
 				if page.shadowKey != nil {
 					// remove shadow key and replace with current first key
@@ -548,19 +581,23 @@ func (dumper *dumper) flush(ctx *context) {
 			ctx.committed[level][parentAddr] = nil
 		}
 	}
-	return
+	return nil
 }
 
-func (dumper *dumper) writePage(page *pageForDump) chunk.Address {
-	return writeTo(page.buildCompressedBytes())
+func (dumper *dumper) writePage(page *pageForDump) (chunk.Address, error) {
+	return dumper.writer.Write(page.buildBytes())
 }
 
-func (dumper *dumper) writePages(pages []*pageForDump) []chunk.Address {
+func (dumper *dumper) writePages(pages []*pageForDump) ([]chunk.Address, error) {
 	addrs := make([]chunk.Address, 0)
 	for _, page := range pages {
-		addrs = append(addrs, writeTo(page.buildCompressedBytes()))
+		addr, err := dumper.writer.Write(page.buildBytes())
+		if err != nil {
+			return nil, err
+		}
+		addrs = append(addrs, addr)
 	}
-	return addrs
+	return addrs, nil
 }
 
 // context the context for b+ tree dump progress
