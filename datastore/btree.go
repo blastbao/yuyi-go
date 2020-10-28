@@ -19,6 +19,9 @@ import "yuyi-go/datastore/chunk"
 type BTree struct {
 	// lastTreeInfo last tree info after Cow synced from memory table.
 	lastTreeInfo *TreeInfo
+
+	// dumper the dumper handler for persist new entries
+	dumper *dumper
 }
 
 type TreeInfo struct {
@@ -200,6 +203,10 @@ func (tree *BTree) findNextLeaf(curPath []*pathItem) []*pathItem {
 		i++
 	}
 	return curPath
+}
+
+func (btree *BTree) isDumping() bool {
+	return btree.dumper != nil
 }
 
 func mightContains(treeInfo *TreeInfo, key *Key) bool {

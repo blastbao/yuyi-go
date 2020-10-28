@@ -32,7 +32,7 @@ outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper := buildDumperInstance(btree)
+		dumper := newDumper(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
 		if !validateBTree(btree.lastTreeInfo.root) {
 			t.Error("tree invalid\n")
@@ -67,13 +67,13 @@ func TestPutAndRemoveEntries(t *testing.T) {
 	// init with 2000 put entries
 	entries := randomPutKVEntries(entriesCount)
 	allEntries = mergeEntries(allEntries, entries)
-	dumper := buildDumperInstance(btree)
+	dumper := newDumper(btree)
 	btree.lastTreeInfo = dumper.Dump(entries)
 outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper := buildDumperInstance(btree)
+		dumper := newDumper(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
 		if !validateBTree(btree.lastTreeInfo.root) {
 			t.Error("tree invalid\n")
@@ -108,7 +108,7 @@ func TestPutAndRemoveAll(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		// put entries
 		entries := randomPutKVEntries(entriesCount)
-		dumper = buildDumperInstance(btree)
+		dumper = newDumper(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
 
 		// remove entries
@@ -118,7 +118,7 @@ func TestPutAndRemoveAll(t *testing.T) {
 				Value:     nil,
 			}
 		}
-		dumper = buildDumperInstance(btree)
+		dumper = newDumper(btree)
 		btree.lastTreeInfo = dumper.Dump(entries)
 
 		listRes := btree.List(nil, nil, 1000)
@@ -126,40 +126,6 @@ func TestPutAndRemoveAll(t *testing.T) {
 			t.Error("tree is not empty")
 			break
 		}
-	}
-}
-
-func buildDumperInstance(btree *BTree) *dumper {
-	var root pageForDump
-	var depth int
-	if btree.lastTreeInfo != nil && btree.lastTreeInfo.root != nil {
-		page := btree.lastTreeInfo.root
-		root = pageForDump{
-			page:      *page,
-			dirty:     false,
-			valid:     true,
-			size:      len(page.content),
-			shadowKey: nil,
-		}
-		depth = btree.lastTreeInfo.depth
-		return &dumper{
-			btree:         btree,
-			root:          &root,
-			filter:        &dummyFilter{},
-			cache:         map[chunk.Address]*pageForDump{},
-			treeDepth:     depth,
-			leafPageSize:  8192,
-			indexPageSize: 8192,
-		}
-	}
-	return &dumper{
-		btree:         btree,
-		root:          nil,
-		filter:        &dummyFilter{},
-		cache:         map[chunk.Address]*pageForDump{},
-		treeDepth:     0,
-		leafPageSize:  8192,
-		indexPageSize: 8192,
 	}
 }
 

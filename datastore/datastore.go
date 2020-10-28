@@ -14,10 +14,36 @@
 
 package datastore
 
+import (
+	"sync"
+	"time"
+)
+
 var (
 	minSeq = uint64(0)
 	maxSeq = uint64(0xFFFFFFFFFFFFFFFF)
+
+	// register all active datastore
+	stores = make([]*DataStore, 0)
+
+	done   = make(chan bool)
+	ticker = time.NewTicker(5 * time.Second)
 )
+
+func init() {
+	for {
+		select {
+		case <-done:
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			for _, store := range stores {
+				// check if the store should do flushing
+				store.checkForFlushing()
+			}
+		}
+	}
+}
 
 type DataStore struct {
 	// name the name of the datastore
@@ -37,6 +63,9 @@ type DataStore struct {
 	// sequence will be acquired and make sure that no later committed
 	// kv will be read
 	seq uint64
+
+	// mu the lock for checking if memory table is ready to dump
+	mu sync.Mutex
 }
 
 func (store *DataStore) Put(key Key, value Value) {
@@ -104,6 +133,30 @@ func (store *DataStore) List(start Key, end Key, max int) []*KVPair {
 	return nil
 }
 
-func ReverseList(start Key, end Value, max uint16) []Value {
+func (store *DataStore) ReverseList(start Key, end Value, max uint16) []Value {
+	return nil
+}
+
+func (store *DataStore) checkForFlushing() {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+
+	if store.shouldFlush() {
+		go store.flush()
+	}
+}
+
+func (store *DataStore) shouldFlush() bool {
+	return len(store.sealedMemTables) != 0 && store.btree.isDumping()
+}
+
+func (store *DataStore) flush() {
+	sealed := store.sealedMemTables[0:]
+
+	dumper := newDumper(store.btree)
+	store.btree.lastTreeInfo = dumper.Dump(mergeMemTables(sealed))
+}
+
+func mergeMemTables(tables []*MemTable) []*KVEntry {
 	return nil
 }

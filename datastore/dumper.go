@@ -16,6 +16,7 @@ package datastore
 
 import (
 	"fmt"
+
 	"yuyi-go/datastore/chunk"
 )
 
@@ -40,6 +41,40 @@ type dumper struct {
 
 	// indexPageSize the size limit for index page
 	indexPageSize int
+}
+
+func newDumper(btree *BTree) *dumper {
+	var root pageForDump
+	var depth int
+	if btree.lastTreeInfo != nil && btree.lastTreeInfo.root != nil {
+		page := btree.lastTreeInfo.root
+		root = pageForDump{
+			page:      *page,
+			dirty:     false,
+			valid:     true,
+			size:      len(page.content),
+			shadowKey: nil,
+		}
+		depth = btree.lastTreeInfo.depth
+		return &dumper{
+			btree:         btree,
+			root:          &root,
+			filter:        &dummyFilter{},
+			cache:         map[chunk.Address]*pageForDump{},
+			treeDepth:     depth,
+			leafPageSize:  8192,
+			indexPageSize: 8192,
+		}
+	}
+	return &dumper{
+		btree:         btree,
+		root:          nil,
+		filter:        &dummyFilter{},
+		cache:         map[chunk.Address]*pageForDump{},
+		treeDepth:     0,
+		leafPageSize:  8192,
+		indexPageSize: 8192,
+	}
 }
 
 func (dumper *dumper) Dump(entries []*KVEntry) *TreeInfo {
