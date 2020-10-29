@@ -48,3 +48,15 @@ type KVEntry struct {
 func (key Key) Compare(another Key) int {
 	return bytes.Compare(key, another)
 }
+
+func compareKVEntry(entry1 *KVEntry, entry2 *KVEntry) int {
+	return compareKeyAndSeq(entry1.Key, entry1.Seq, entry2.Key, entry2.Seq)
+}
+
+func compareKeyAndSeq(key1 Key, seq1 uint64, key2 Key, seq2 uint64) int {
+	res := key1.Compare(key2)
+	if res != 0 {
+		return res
+	}
+	return int(seq1 - seq2)
+}

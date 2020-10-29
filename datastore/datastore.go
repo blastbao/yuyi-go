@@ -31,6 +31,7 @@ var (
 )
 
 func init() {
+	// start a goroutine to check memory table flushing periodly
 	go func() {
 		for {
 			select {
@@ -163,10 +164,23 @@ func (store *DataStore) flush() {
 	treeInfo, err := dumper.Dump(mergeMemTables(sealed))
 	if err != nil {
 		// log error log
+	} else {
+		// update last tree info
+		store.mu.Lock()
+		defer store.mu.Unlock()
+
+		store.btree.lastTreeInfo = treeInfo
 	}
-	store.btree.lastTreeInfo = treeInfo
+	store.btree = nil
 }
 
 func mergeMemTables(tables []*MemTable) []*KVEntry {
+	// new combined iterator
+	iters := make([]*listIter, len(tables))
+	for i, table := range tables {
+		iters[i] = table.newMemTableIter(nil, nil, maxSeq)
+	}
+
+	combinedIter := newCombinedIter(iters)
 	return nil
 }

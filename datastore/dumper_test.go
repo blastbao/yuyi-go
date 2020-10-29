@@ -33,7 +33,7 @@ func TestPutEntries(t *testing.T) {
 	}
 	allEntries := make([]*KVEntry, 0)
 outer:
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper, err := newDumper(btree)
@@ -100,7 +100,7 @@ func TestPutAndRemoveEntries(t *testing.T) {
 	}
 	btree.lastTreeInfo = treeInfo
 outer:
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
 		dumper, err := newDumper(btree)
@@ -151,7 +151,7 @@ func TestPutAndRemoveAll(t *testing.T) {
 		return
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 20; i++ {
 		// put entries
 		entries := randomPutKVEntries(entriesCount)
 		dumper, err := newDumper(btree)
