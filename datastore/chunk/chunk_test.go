@@ -26,7 +26,7 @@ func TestReaderAndWriter(t *testing.T) {
 		os.Mkdir(folder, os.ModePerm)
 	}
 
-	writer, err := newBtreeWriter()
+	writer, err := NewBtreeWriter()
 	if err != nil {
 		t.Error("Failed to create writer")
 		return

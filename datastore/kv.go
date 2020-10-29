@@ -16,7 +16,7 @@ package datastore
 
 import "bytes"
 
-type OPERATION uint8
+type OPERATION byte
 
 const (
 	Put       OPERATION = 1
@@ -43,6 +43,43 @@ type KVEntry struct {
 	Key        Key
 	TableValue TableValue
 	Seq        uint64
+}
+
+func newKVEntry(key Key, value Value, oper OPERATION, seq uint64) *KVEntry {
+	return &KVEntry{
+		Key: key,
+		TableValue: TableValue{
+			Operation: oper,
+			Value:     value,
+		},
+		Seq: seq,
+	}
+}
+
+// buildBytes create bytes of the KVEntry. The bytes will be written in wal chunk
+func (entry *KVEntry) buildBytes() []byte {
+	keyLen := len(entry.Key)
+	resLen := 4 + keyLen // 4 is the length of the key
+
+	oper := entry.TableValue.Operation
+	resLen++ // 1 is the length of operation
+	if oper == Put || oper == PutAbsent {
+		resLen += 4 + len(entry.TableValue.Value) // 4 is length of the value
+	}
+
+	res := make([]byte, 0, resLen)
+	// key part
+	res = append(res, byte(keyLen>>24), byte(keyLen>>16), byte(keyLen>>8), byte(keyLen))
+	res = append(res, entry.Key...)
+
+	// table value part
+	res = append(res, byte(oper))
+	if oper == Put || oper == PutAbsent {
+		valueLen := len(entry.TableValue.Value)
+		res = append(res, byte(valueLen>>24), byte(valueLen>>16), byte(valueLen>>8), byte(valueLen))
+		res = append(res, entry.TableValue.Value...)
+	}
+	return res
 }
 
 func (key Key) Compare(another Key) int {

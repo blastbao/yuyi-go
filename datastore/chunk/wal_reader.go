@@ -12,7 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datastore
+package chunk
 
-type WalEntry struct {
+type walReader struct {
+	reader ChunkReader
+}
+
+func NewWalReader() (*walReader, error) {
+	reader := newChainedWalReader()
+	return &walReader{
+		reader: reader,
+	}, nil
+}
+
+func (r *walReader) Read(addr Address) (p []byte, err error) {
+	return r.reader.Read(addr)
+}
+
+func newChainedWalReader() ChunkReader {
+	return &crc32Reader{
+		reader: &snappyReader{
+			reader: &fileReader{
+				chunkType: wal,
+			},
+		},
+	}
 }

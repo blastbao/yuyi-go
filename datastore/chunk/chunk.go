@@ -21,6 +21,13 @@ import (
 	"github.com/google/uuid"
 )
 
+type ChunkType int8
+
+const (
+	wal   ChunkType = 1
+	btree ChunkType = 2
+)
+
 var (
 	// maxCapacity set max capacity of each file to 512k
 	maxCapacity = 512 * 1024
@@ -29,6 +36,7 @@ var (
 
 type chunk struct {
 	name        uuid.UUID
+	chunkType   ChunkType
 	createdTime int64
 	sealedTime  int64
 
@@ -37,9 +45,9 @@ type chunk struct {
 	sealedLength int
 }
 
-func newChunk() (*chunk, error) {
+func newChunk(chunkType ChunkType) (*chunk, error) {
 	name := uuid.New()
-	_, err := os.Create(chunkFileName(name))
+	_, err := os.Create(chunkFileName(name, chunkType))
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +61,6 @@ func newChunk() (*chunk, error) {
 	return c, nil
 }
 
-func chunkFileName(name uuid.UUID) string {
+func chunkFileName(name uuid.UUID, chunkType ChunkType) string {
 	return folder + string(os.PathSeparator) + name.String()
 }

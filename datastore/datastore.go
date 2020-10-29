@@ -16,7 +16,9 @@ package datastore
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
+	"yuyi-go/datastore/chunk"
 )
 
 var (
@@ -67,11 +69,19 @@ type DataStore struct {
 	// kv will be read
 	seq uint64
 
+	// walWriter the writer to handle wal writing
+	walWriter chunk.ChunkReader
+
+	// stop if the datastore is ready
+	ready bool
+
 	// mu the lock for checking if memory table is ready to dump
 	mu sync.Mutex
 }
 
 func (store *DataStore) Put(key Key, value Value) {
+	// Todo: Implement a channel to write wal. After wal write finished, add to memory table with call back
+	// entry := newKVEntry(key, value, Put, store.getAndIncreaseSeq())
 	return
 }
 
@@ -140,6 +150,15 @@ func (store *DataStore) ReverseList(start Key, end Value, max uint16) []Value {
 	return nil
 }
 
+func (store *DataStore) getAndIncreaseSeq() uint64 {
+	for {
+		oldSeq := store.seq
+		if atomic.CompareAndSwapUint64(&store.seq, oldSeq, oldSeq+1) {
+			return oldSeq
+		}
+	}
+}
+
 func (store *DataStore) checkForFlushing() {
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -165,11 +184,15 @@ func (store *DataStore) flush() {
 	if err != nil {
 		// log error log
 	} else {
-		// update last tree info
 		store.mu.Lock()
 		defer store.mu.Unlock()
 
+		// update last tree info and
 		store.btree.lastTreeInfo = treeInfo
+
+		// release sealed memory table
+		remaining := len(store.sealedMemTables) - len(sealed)
+		store.sealedMemTables = store.sealedMemTables[0:remaining:remaining]
 	}
 	store.btree = nil
 }
@@ -182,5 +205,13 @@ func mergeMemTables(tables []*MemTable) []*KVEntry {
 	}
 
 	combinedIter := newCombinedIter(iters)
-	return nil
+	res := make([]*KVEntry, 0)
+	for {
+		if combinedIter.hasNext() {
+			res = append(res, combinedIter.next())
+		} else {
+			break
+		}
+	}
+	return res
 }

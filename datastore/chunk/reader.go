@@ -25,29 +25,6 @@ type ChunkReader interface {
 	Read(addr Address) (p []byte, err error)
 }
 
-type btreeReader struct {
-	reader ChunkReader
-}
-
-func NewBtreeReader() (*btreeReader, error) {
-	reader := newChainedReader()
-	return &btreeReader{
-		reader: reader,
-	}, nil
-}
-
-func (r *btreeReader) Read(addr Address) (p []byte, err error) {
-	return r.reader.Read(addr)
-}
-
-func newChainedReader() ChunkReader {
-	return &crc32Reader{
-		reader: &snappyReader{
-			reader: &fileReader{},
-		},
-	}
-}
-
 type crc32Reader struct {
 	reader ChunkReader
 }
@@ -85,10 +62,12 @@ func (r *snappyReader) Read(addr Address) (p []byte, err error) {
 	return p, nil
 }
 
-type fileReader struct{}
+type fileReader struct {
+	chunkType ChunkType
+}
 
 func (r *fileReader) Read(addr Address) (p []byte, err error) {
-	file, err := os.Open(chunkFileName(addr.Chunk))
+	file, err := os.Open(chunkFileName(addr.Chunk, r.chunkType))
 	if err != nil {
 		return nil, err
 	}

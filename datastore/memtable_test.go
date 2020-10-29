@@ -118,7 +118,7 @@ func verifyPutResult(t *testing.T, skipList *SkipList, pairs []*KVPair) {
 		return bytes.Compare(pairs[i].Key, pairs[j].Key) <= 0
 	})
 	i := 0
-	iterator := skipList.NewIterator(nil, nil, 0)
+	iterator := newListIter(skipList, nil, nil, 0)
 	for {
 		if iterator.hasNext() {
 			entry := iterator.next()
