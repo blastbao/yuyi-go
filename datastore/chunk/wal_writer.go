@@ -14,28 +14,53 @@
 
 package chunk
 
-import "io"
+import (
+	"io"
+)
 
-type walWriter struct {
-	chunk  *chunk
-	offset int
-	writer io.Writer
+type WalWriter struct {
+	chunk      *chunk
+	offset     int
+	writer     io.Writer
+	endCond    bool
+	aggregator chan struct{}
 }
 
-func NewWalWriter() (*walWriter, error) {
+func NewWalWriter() (*WalWriter, error) {
 	c, err := newChunk(wal)
 	if err != nil {
 		return nil, err
 	}
-	writer := newChainedWalWriter(c)
-	return &walWriter{
-		chunk:  c,
-		offset: 0,
-		writer: writer,
-	}, nil
+	chainedWriter := newChainedWalWriter(c)
+	endCond := false
+	aggregator := make(chan struct{})
+	writer := &WalWriter{
+		chunk:      c,
+		offset:     0,
+		writer:     chainedWriter,
+		endCond:    endCond,
+		aggregator: aggregator,
+	}
+	// // init goroutine for writer channel
+	// go func() {
+	// 	for endCond {
+	// 		select {
+	// 		case bytes := <-aggregator:
+	// 			writer.Write
+	// 		case <-time.After(time.Microsecond):
+	// 			println("end with timeout")
+	// 			endCond = true
+	// 		}
+	// 	}
+	// }()
+	return writer, nil
 }
 
-func (w *walWriter) Write(p []byte) (addr Address, err error) {
+func (w *WalWriter) Write(p []byte, callback WalCallback) (addr Address, err error) {
+	return w.write(p)
+}
+
+func (w *WalWriter) write(p []byte) (addr Address, err error) {
 	// try rotate chunk if current chunk is nil
 	if w.chunk == nil {
 		err = w.rotateWal()
@@ -69,7 +94,9 @@ func (w *walWriter) Write(p []byte) (addr Address, err error) {
 	return addr, nil
 }
 
-func (w *walWriter) rotateWal() error {
+type WalCallback func([]byte) bool
+
+func (w *WalWriter) rotateWal() error {
 	chunk, err := newChunk(wal)
 	if err != nil {
 		w.chunk = nil // set chunk nil as origin chunk is no longer available to write

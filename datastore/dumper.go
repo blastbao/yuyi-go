@@ -31,7 +31,7 @@ type dumper struct {
 	filter Filter
 
 	// writer the writer for btree pages
-	writer chunk.ChunkWrtier
+	writer *chunk.BtreeWriter
 
 	// cache the cache for page buffer that may be modified during dump
 	cache map[chunk.Address]*pageForDump

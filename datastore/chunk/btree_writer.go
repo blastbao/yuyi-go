@@ -16,26 +16,34 @@ package chunk
 
 import "io"
 
-type btreeWriter struct {
-	chunk  *chunk
+type BtreeWriter struct {
+	// chunk the chunk file that is writing to
+	chunk *chunk
+
+	// offset the offset of position in the chunk file to write
 	offset int
+
+	// writer the inner writer to handle writing
 	writer io.Writer
+
+	// channel the channel to accept write request
+	channel chan []byte
 }
 
-func NewBtreeWriter() (*btreeWriter, error) {
+func NewBtreeWriter() (*BtreeWriter, error) {
 	c, err := newChunk(btree)
 	if err != nil {
 		return nil, err
 	}
 	writer := newChainedBtreeWriter(c)
-	return &btreeWriter{
+	return &BtreeWriter{
 		chunk:  c,
 		offset: 0,
 		writer: writer,
 	}, nil
 }
 
-func (w *btreeWriter) Write(p []byte) (addr Address, err error) {
+func (w *BtreeWriter) Write(p []byte) (addr Address, err error) {
 	// try rotate chunk if current chunk is nil
 	if w.chunk == nil {
 		err = w.rotateBTree()
@@ -69,7 +77,7 @@ func (w *btreeWriter) Write(p []byte) (addr Address, err error) {
 	return addr, nil
 }
 
-func (w *btreeWriter) rotateBTree() error {
+func (w *BtreeWriter) rotateBTree() error {
 	chunk, err := newChunk(btree)
 	if err != nil {
 		w.chunk = nil // set chunk nil as origin chunk is no longer available to write

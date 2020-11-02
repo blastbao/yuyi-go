@@ -14,7 +14,11 @@
 
 package datastore
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/google/uuid"
+)
 
 type OPERATION byte
 
@@ -57,9 +61,9 @@ func newKVEntry(key Key, value Value, oper OPERATION, seq uint64) *KVEntry {
 }
 
 // buildBytes create bytes of the KVEntry. The bytes will be written in wal chunk
-func (entry *KVEntry) buildBytes() []byte {
+func (entry *KVEntry) buildBytes(dsId uuid.UUID) []byte {
 	keyLen := len(entry.Key)
-	resLen := 4 + keyLen // 4 is the length of the key
+	resLen := 16 + 4 + keyLen // 16 is the length of the datastore id, 4 is the length of the key
 
 	oper := entry.TableValue.Operation
 	resLen++ // 1 is the length of operation
@@ -68,6 +72,9 @@ func (entry *KVEntry) buildBytes() []byte {
 	}
 
 	res := make([]byte, 0, resLen)
+	// datastore id part
+	res = append(res, dsId[0:]...)
+
 	// key part
 	res = append(res, byte(keyLen>>24), byte(keyLen>>16), byte(keyLen>>8), byte(keyLen))
 	res = append(res, entry.Key...)

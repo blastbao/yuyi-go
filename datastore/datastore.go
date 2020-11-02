@@ -70,7 +70,7 @@ type DataStore struct {
 	seq uint64
 
 	// walWriter the writer to handle wal writing
-	walWriter chunk.ChunkReader
+	walWriter *chunk.WalWriter
 
 	// stop if the datastore is ready
 	ready bool
@@ -82,6 +82,7 @@ type DataStore struct {
 func (store *DataStore) Put(key Key, value Value) {
 	// Todo: Implement a channel to write wal. After wal write finished, add to memory table with call back
 	// entry := newKVEntry(key, value, Put, store.getAndIncreaseSeq())
+	// store.walWriter.Write(entry, )
 	return
 }
 

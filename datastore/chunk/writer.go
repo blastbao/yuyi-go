@@ -22,8 +22,9 @@ import (
 	"github.com/golang/snappy"
 )
 
-type ChunkWrtier interface {
-	Write(p []byte) (addr Address, err error)
+type WriteResult struct {
+	Addr Address
+	Err  error
 }
 
 type crc32Writer struct {
