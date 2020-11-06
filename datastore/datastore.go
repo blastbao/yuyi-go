@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"time"
 	"yuyi-go/datastore/chunk"
+
+	"github.com/google/uuid"
 )
 
 var (
@@ -55,7 +57,7 @@ func background() {
 
 type DataStore struct {
 	// name the name of the datastore
-	name string
+	name uuid.UUID
 
 	// activeMemTable current using memory table for writing data to.
 	activeMemTable MemTable
@@ -68,7 +70,7 @@ type DataStore struct {
 	btree *BTree
 
 	// mutations the channel to hold the mutations to be handled
-	mutations chan mutation
+	mutations chan *mutation
 
 	// committed the last sequence of write operation already persised. W
 	// When read started, committed sequence will be acquired and make sure
@@ -88,7 +90,7 @@ type DataStore struct {
 	ready bool
 
 	// ready if the datastore is stopped
-	stop bool
+	stopped bool
 
 	// flushMutex the lock for checking if memory table is ready to flush
 	flushMutex sync.Mutex
@@ -102,13 +104,15 @@ func New() *DataStore {
 func (store *DataStore) Put(key Key, value Value) error {
 	// create mutation for this put operation
 	entry := newKVEntry(key, value, Put)
-	mutation := newMutation(entry)
+	mutation := newMutation(entry, 30*time.Second)
 
 	store.mutations <- mutation
-	if mutation.wait() != nil {
+	err := mutation.wait()
+	if err != nil {
 		// put operation failed, need stop the datastore
 		store.stop()
 	}
+	return err
 }
 
 func (store *DataStore) Remove(key Key) {
@@ -177,7 +181,7 @@ func (store *DataStore) ReverseList(start Key, end Value, max uint16) []Value {
 }
 
 func (store *DataStore) handleMutations() {
-	for !store.stop {
+	for !store.stopped {
 		mutation := <-store.mutations
 		// generate new seq and put to memory table
 		mutation.entry.Seq = store.newSeq()
@@ -218,34 +222,11 @@ func newMutation(entry *KVEntry, duration time.Duration) *mutation {
 	}
 }
 
-func (m *mutation) wait() {
+func (m *mutation) wait() error {
 	select {
-	case err := <-task.complete:
+	case err := <-m.complete:
 		return err
-	case <-task.timeout:
-		return chunk.ErrTimeout
-	}
-}
-
-func (store *DataStore) putEntry() {
-
-}
-
-func (store *DataStore) handleWalWriteCompleted() {
-	for !store.stop {
-		task := <-store.walWriter.CompletedTask(store.name)
-		// generate new seq and put to active memory table
-		newSeq := store.committed + 1
-		task
-	}
-}
-
-func (store *DataStore) execWriteTask(task *chunk.writeTask) error {
-	// put the write task to the channel for writing
-	select {
-	case err := <-task.complete:
-		return err
-	case <-task.timeout:
+	case <-m.timeout:
 		return chunk.ErrTimeout
 	}
 }
@@ -285,8 +266,8 @@ func (store *DataStore) flush() {
 	if err != nil {
 		// log error log
 	} else {
-		store.mu.Lock()
-		defer store.mu.Unlock()
+		store.flushMutex.Lock()
+		defer store.flushMutex.Unlock()
 
 		// update last tree info and
 		store.btree.lastTreeInfo = treeInfo
