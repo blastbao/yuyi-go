@@ -15,6 +15,7 @@
 package datastore
 
 import (
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,21 +34,23 @@ var (
 )
 
 func init() {
-	// start a goroutine to check memory table flushing periodly
-	go func() {
-		for {
-			select {
-			case <-done:
-				ticker.Stop()
-				return
-			case <-ticker.C:
-				for _, store := range stores {
-					// check if the store should do flushing
-					store.checkForFlushing()
-				}
+	go background()
+}
+
+// background Check memory table flushing periodly
+func background() {
+	for {
+		select {
+		case <-done:
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			for _, store := range stores {
+				// check if the store should do flushing
+				store.checkForFlushing()
 			}
 		}
-	}()
+	}
 }
 
 type DataStore struct {
@@ -64,26 +67,48 @@ type DataStore struct {
 	// btree the structure for persisting data from memory table
 	btree *BTree
 
-	// seq the sequence of write operation. When read started, current
-	// sequence will be acquired and make sure that no later committed
-	// kv will be read
-	seq uint64
+	// mutations the channel to hold the mutations to be handled
+	mutations chan mutation
+
+	// committed the last sequence of write operation already persised. W
+	// When read started, committed sequence will be acquired and make sure
+	// that kv with uncommitted seq kv will be not read
+	committed uint64
+
+	// uncommitted the last sequence of write operation is doing persist.
+	uncommitted uint64
 
 	// walWriter the writer to handle wal writing
-	walWriter *chunk.WalWriter
+	walWriter chunk.ChunkWrtier
 
-	// stop if the datastore is ready
+	// walWriterCallback the channel to handle wal write finished call back event
+	walWriterCallback chan interface{}
+
+	// ready if the datastore is ready
 	ready bool
 
-	// mu the lock for checking if memory table is ready to dump
-	mu sync.Mutex
+	// ready if the datastore is stopped
+	stop bool
+
+	// flushMutex the lock for checking if memory table is ready to flush
+	flushMutex sync.Mutex
 }
 
-func (store *DataStore) Put(key Key, value Value) {
-	// Todo: Implement a channel to write wal. After wal write finished, add to memory table with call back
-	// entry := newKVEntry(key, value, Put, store.getAndIncreaseSeq())
-	// store.walWriter.Write(entry, )
-	return
+// New create a new datastore
+func New() *DataStore {
+	return &DataStore{}
+}
+
+func (store *DataStore) Put(key Key, value Value) error {
+	// create mutation for this put operation
+	entry := newKVEntry(key, value, Put)
+	mutation := newMutation(entry)
+
+	store.mutations <- mutation
+	if mutation.wait() != nil {
+		// put operation failed, need stop the datastore
+		store.stop()
+	}
 }
 
 func (store *DataStore) Remove(key Key) {
@@ -91,7 +116,7 @@ func (store *DataStore) Remove(key Key) {
 }
 
 func (store *DataStore) Has(key Key) (bool, error) {
-	seq := store.seq
+	seq := store.committed
 	value := store.activeMemTable.Get(key, seq)
 	if value != nil {
 		if value.Operation == Remove {
@@ -112,7 +137,7 @@ func (store *DataStore) Has(key Key) (bool, error) {
 }
 
 func (store *DataStore) Get(key Key) (Value, error) {
-	seq := store.seq
+	seq := store.committed
 	value := store.activeMemTable.Get(key, seq)
 	if value != nil {
 		if value.Operation == Remove {
@@ -151,18 +176,93 @@ func (store *DataStore) ReverseList(start Key, end Value, max uint16) []Value {
 	return nil
 }
 
-func (store *DataStore) getAndIncreaseSeq() uint64 {
+func (store *DataStore) handleMutations() {
+	for !store.stop {
+		mutation := <-store.mutations
+		// generate new seq and put to memory table
+		mutation.entry.Seq = store.newSeq()
+		store.putActive(mutation.entry)
+
+		// write wal for this entry
+		store.writeWal(mutation)
+	}
+}
+
+func (store *DataStore) writeWal(m *mutation) {
+	bytes := m.entry.buildBytes(store.name)
+	store.walWriter.AsyncWrite()
+}
+
+func (store *DataStore) stop() {
+	// handle datastore stop and clean up
+}
+
+var ErrTimeout = errors.New("Mutation timeout")
+
+type mutation struct {
+	// kv entry to put to datastore
+	entry *KVEntry
+
+	// complete the channel to notify task finished
+	complete chan error
+
+	// timeout the channel for writing timeout
+	timeout <-chan time.Time
+}
+
+func newMutation(entry *KVEntry, duration time.Duration) *mutation {
+	return &mutation{
+		entry:    entry,
+		complete: make(chan error),
+		timeout:  time.After(duration),
+	}
+}
+
+func (m *mutation) wait() {
+	select {
+	case err := <-task.complete:
+		return err
+	case <-task.timeout:
+		return chunk.ErrTimeout
+	}
+}
+
+func (store *DataStore) putEntry() {
+
+}
+
+func (store *DataStore) handleWalWriteCompleted() {
+	for !store.stop {
+		task := <-store.walWriter.CompletedTask(store.name)
+		// generate new seq and put to active memory table
+		newSeq := store.committed + 1
+		task
+	}
+}
+
+func (store *DataStore) execWriteTask(task *chunk.writeTask) error {
+	// put the write task to the channel for writing
+	select {
+	case err := <-task.complete:
+		return err
+	case <-task.timeout:
+		return chunk.ErrTimeout
+	}
+}
+
+func (store *DataStore) newSeq() uint64 {
 	for {
-		oldSeq := store.seq
-		if atomic.CompareAndSwapUint64(&store.seq, oldSeq, oldSeq+1) {
-			return oldSeq
+		oldSeq := store.uncommitted
+		newSeq := oldSeq + 1
+		if atomic.CompareAndSwapUint64(&store.uncommitted, oldSeq, newSeq) {
+			return newSeq
 		}
 	}
 }
 
 func (store *DataStore) checkForFlushing() {
-	store.mu.Lock()
-	defer store.mu.Unlock()
+	store.flushMutex.Lock()
+	defer store.flushMutex.Unlock()
 
 	if store.shouldFlush() {
 		go store.flush()

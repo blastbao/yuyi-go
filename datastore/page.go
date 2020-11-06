@@ -16,11 +16,12 @@ package datastore
 
 import (
 	"bytes"
+
 	"yuyi-go/datastore/chunk"
 	"yuyi-go/shared"
 )
 
-type PageType int8
+type PageType byte
 
 const (
 	Root  PageType = 1

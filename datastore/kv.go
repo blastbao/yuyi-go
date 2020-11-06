@@ -49,19 +49,18 @@ type KVEntry struct {
 	Seq        uint64
 }
 
-func newKVEntry(key Key, value Value, oper OPERATION, seq uint64) *KVEntry {
+func newKVEntry(key Key, value Value, oper OPERATION) *KVEntry {
 	return &KVEntry{
 		Key: key,
 		TableValue: TableValue{
 			Operation: oper,
 			Value:     value,
 		},
-		Seq: seq,
 	}
 }
 
 // buildBytes create bytes of the KVEntry. The bytes will be written in wal chunk
-func (entry *KVEntry) buildBytes(dsId uuid.UUID) []byte {
+func (entry *KVEntry) buildBytes(ds uuid.UUID) []byte {
 	keyLen := len(entry.Key)
 	resLen := 16 + 4 + keyLen // 16 is the length of the datastore id, 4 is the length of the key
 
@@ -73,7 +72,7 @@ func (entry *KVEntry) buildBytes(dsId uuid.UUID) []byte {
 
 	res := make([]byte, 0, resLen)
 	// datastore id part
-	res = append(res, dsId[0:]...)
+	res = append(res, ds[0:]...)
 
 	// key part
 	res = append(res, byte(keyLen>>24), byte(keyLen>>16), byte(keyLen>>8), byte(keyLen))
