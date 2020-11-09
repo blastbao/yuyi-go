@@ -26,7 +26,7 @@ import (
 
 var entriesCount = 2000
 
-func TestPutEntries(t *testing.T) {
+func TestBTreePutEntries(t *testing.T) {
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		t.Error("Create empty btree failed")
@@ -78,7 +78,7 @@ outer:
 	}
 }
 
-func TestPutAndRemoveEntries(t *testing.T) {
+func TestBTreePutAndRemoveEntries(t *testing.T) {
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		t.Error("Create empty btree failed")
@@ -145,7 +145,7 @@ outer:
 	}
 }
 
-func TestPutAndRemoveAll(t *testing.T) {
+func TestBTreePutAndRemoveAll(t *testing.T) {
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		t.Error("Create empty btree failed")

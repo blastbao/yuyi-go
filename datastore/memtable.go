@@ -19,12 +19,27 @@ import (
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
+	"yuyi-go/datastore/chunk"
 )
 
 type MemTable struct {
+	// skipList the skip list to holds entries
 	skipList *SkipList
-	sealed   bool
-	capacity int32
+
+	// firstSeq the first entry's sequence
+	firstSeq uint64
+
+	// lastSeq the last entry's sequence
+	lastSeq uint64
+
+	// lastWalAddr
+	lastWalAddr chunk.Address
+
+	// sealed if the memory table is sealed(not allowed to edit)
+	sealed bool
+
+	// capacity current capacity of the memory table
+	capacity int
 }
 
 func NewMemTable() *MemTable {
@@ -36,20 +51,33 @@ func NewMemTable() *MemTable {
 	}
 }
 
-func (memTable *MemTable) Has(key Key, seq uint64) bool {
-	return memTable.skipList.Get(key, seq) != nil
+func (mt *MemTable) Put(entry *KVEntry) error {
+	err := mt.skipList.Put(entry)
+	if err != nil {
+		// failed to put entry to this memory table
+	}
+	mt.capacity = mt.capacity + entry.size()
+	if mt.lastSeq == 0 {
+		mt.firstSeq = entry.Seq
+	}
+	mt.lastSeq = entry.Seq
+	return nil
 }
 
-func (memTable *MemTable) Get(key Key, seq uint64) *TableValue {
-	return memTable.skipList.Get(key, seq)
+func (mt *MemTable) Has(key Key, seq uint64) bool {
+	return mt.skipList.Get(key, seq) != nil
 }
 
-func (memTable *MemTable) List(start Key, end Key, seq uint64) *listIter {
-	return memTable.newMemTableIter(start, end, seq)
+func (mt *MemTable) Get(key Key, seq uint64) *TableValue {
+	return mt.skipList.Get(key, seq)
 }
 
-func (memTable *MemTable) newMemTableIter(start Key, end Key, seq uint64) *listIter {
-	return newListIter(memTable.skipList, start, end, seq)
+func (mt *MemTable) List(start Key, end Key, seq uint64) *listIter {
+	return mt.newMemTableIter(start, end, seq)
+}
+
+func (mt *MemTable) newMemTableIter(start Key, end Key, seq uint64) *listIter {
+	return newListIter(mt.skipList, start, end, seq)
 }
 
 type node struct {

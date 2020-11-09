@@ -16,6 +16,7 @@ package chunk
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"os"
 	"testing"
@@ -63,6 +64,29 @@ func TestReaderAndWriter(t *testing.T) {
 			t.Error("block read from addr mismatch ", addr)
 			return
 		}
+	}
+}
+
+func TestWalWriter(t *testing.T) {
+	if _, err := os.Stat(folder); os.IsNotExist(err) {
+		os.Mkdir(folder, os.ModePerm)
+	}
+
+	writer, err := NewWalWriter()
+	if err != nil {
+		t.Error("Failed to create writer")
+		return
+	}
+
+	// write to chunk
+	count := 200
+	inputs := make([][]byte, count)
+	for i := 0; i < count; i++ {
+		input := randomBytes((i+1)*100, defaultLetters)
+		writer.AsyncWrite(input, make(chan error, 1), nil)
+
+		fmt.Printf("Put key index %d\n", i)
+		inputs[i] = input
 	}
 }
 

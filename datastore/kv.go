@@ -88,6 +88,14 @@ func (entry *KVEntry) buildBytes(ds uuid.UUID) []byte {
 	return res
 }
 
+func (entry *KVEntry) size() int {
+	resLen := len(entry.Key)
+	if entry.TableValue.Operation == Put {
+		resLen += len(entry.TableValue.Value)
+	}
+	return resLen
+}
+
 func (key Key) Compare(another Key) int {
 	return bytes.Compare(key, another)
 }

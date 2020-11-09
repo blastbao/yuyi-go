@@ -59,8 +59,11 @@ type DataStore struct {
 	// name the name of the datastore
 	name uuid.UUID
 
+	// memTableMaxCapacity the max capacity of a memory table
+	memTableMaxCapacity int
+
 	// activeMemTable current using memory table for writing data to.
-	activeMemTable MemTable
+	activeMemTable *MemTable
 
 	// sealedMemTables the memory table instances that already reached
 	//max limit size and need be persisted
@@ -81,10 +84,7 @@ type DataStore struct {
 	uncommitted uint64
 
 	// walWriter the writer to handle wal writing
-	walWriter chunk.ChunkWrtier
-
-	// walWriterCallback the channel to handle wal write finished call back event
-	walWriterCallback chan interface{}
+	walWriter *chunk.WalWriter
 
 	// ready if the datastore is ready
 	ready bool
@@ -92,19 +92,48 @@ type DataStore struct {
 	// ready if the datastore is stopped
 	stopped bool
 
+	// memTableMutex the lock for change sealed memory table
+	memTabbleMutex sync.Mutex
+
 	// flushMutex the lock for checking if memory table is ready to flush
 	flushMutex sync.Mutex
 }
 
 // New create a new datastore
-func New() *DataStore {
-	return &DataStore{}
+func New() (*DataStore, error) {
+	btree, err := NewEmptyBTree()
+	if err != nil {
+		return nil, err
+	}
+
+	walWriter, err := chunk.NewWalWriter()
+	if err != nil {
+		return nil, err
+	}
+	datastore := &DataStore{
+		name:                uuid.New(),
+		memTableMaxCapacity: 256 * 1024,
+		activeMemTable:      NewMemTable(),
+		sealedMemTables:     make([]*MemTable, 0),
+		btree:               btree,
+		mutations:           make(chan *mutation),
+		walWriter:           walWriter,
+		ready:               true,
+		stopped:             false,
+	}
+	datastore.initBackground()
+	return datastore, nil
+}
+
+func (store *DataStore) initBackground() {
+	// start a goroutine to handle mutations' writing
+	go store.handleMutations()
 }
 
 func (store *DataStore) Put(key Key, value Value) error {
 	// create mutation for this put operation
 	entry := newKVEntry(key, value, Put)
-	mutation := newMutation(entry, 30*time.Second)
+	mutation := newMutation(entry, 10*time.Second)
 
 	store.mutations <- mutation
 	err := mutation.wait()
@@ -161,7 +190,7 @@ func (store *DataStore) Get(key Key) (Value, error) {
 	return store.btree.Get(&key)
 }
 
-func (store *DataStore) List(start Key, end Key, max int) []*KVPair {
+func (store *DataStore) List(start Key, end Key, max int) (*ListResult, error) {
 	// seq := store.seq
 	// activeIter := store.activeMemTable.List(start, end, seq)
 	// sealedIter := make([]*memtable.Iterator, 0)
@@ -173,11 +202,11 @@ func (store *DataStore) List(start Key, end Key, max int) []*KVPair {
 	// res := make([]*memtable.KVPair, 0)
 	// found := 0
 	// Todo: implement min heap for merging result together
-	return nil
+	return nil, nil
 }
 
-func (store *DataStore) ReverseList(start Key, end Value, max uint16) []Value {
-	return nil
+func (store *DataStore) ReverseList(start Key, end Value, max uint16) (*ListResult, error) {
+	return nil, nil
 }
 
 func (store *DataStore) handleMutations() {
@@ -187,14 +216,68 @@ func (store *DataStore) handleMutations() {
 		mutation.entry.Seq = store.newSeq()
 		store.putActive(mutation.entry)
 
-		// write wal for this entry
-		store.writeWal(mutation)
+		// async write wal for this entry.
+		bytes := mutation.entry.buildBytes(store.name)
+		store.walWriter.AsyncWrite(bytes, mutation.complete, store.asyncWriteCallback)
 	}
 }
 
-func (store *DataStore) writeWal(m *mutation) {
-	bytes := m.entry.buildBytes(store.name)
-	store.walWriter.AsyncWrite()
+func (store *DataStore) putActive(entry *KVEntry) {
+	size := entry.size()
+	for store.activeMemTable.capacity+size > store.memTableMaxCapacity {
+		store.memTabbleMutex.Lock()
+		defer store.memTabbleMutex.Unlock()
+
+		// double check if need seal current active
+		if store.activeMemTable.capacity+size > store.memTableMaxCapacity {
+			// need seal current active memory table and create a new one
+			store.activeMemTable.sealed = true
+			sealed := make([]*MemTable, 0)
+			sealed = append(sealed, store.activeMemTable)
+			sealed = append(sealed, store.sealedMemTables...)
+			store.sealedMemTables = sealed
+
+			store.activeMemTable = NewMemTable()
+		}
+	}
+	store.activeMemTable.Put(entry)
+}
+
+func (store *DataStore) asyncWriteCallback(addr chunk.Address, err error) {
+	if err != nil {
+		store.stop()
+		return
+	}
+	// update wal address in memory table and increase committed sequence
+	store.updateWalAddr(addr)
+	store.committed++
+}
+
+var ErrUpdateWalAddr = errors.New("Update wal addr for memory table failed")
+
+func (store *DataStore) updateWalAddr(addr chunk.Address) error {
+	for {
+		active := store.activeMemTable
+		// check if update active wal address first
+		if store.committed <= active.lastSeq && store.committed >= active.firstSeq {
+			active.lastWalAddr = addr
+			return nil
+		}
+
+		// check if update sealed wal addr
+		if store.committed < active.lastSeq {
+			break
+		}
+	}
+
+	// check if update the addr to sealed memory table
+	for _, sealed := range store.sealedMemTables {
+		if store.committed <= sealed.lastSeq && store.committed >= sealed.firstSeq {
+			sealed.lastWalAddr = addr
+			return nil
+		}
+	}
+	return ErrUpdateWalAddr
 }
 
 func (store *DataStore) stop() {
@@ -227,7 +310,7 @@ func (m *mutation) wait() error {
 	case err := <-m.complete:
 		return err
 	case <-m.timeout:
-		return chunk.ErrTimeout
+		return ErrTimeout
 	}
 }
 

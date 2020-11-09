@@ -15,89 +15,185 @@
 package chunk
 
 import (
+	"bufio"
+	"fmt"
+	"hash/crc32"
 	"io"
+	"os"
+	"time"
 )
 
-type walWriter struct {
-	chunk       *chunk
-	offset      int
-	innerWriter io.Writer
+type WalWriter struct {
+	// chunk current chunk to write to
+	chunk *chunk
 
-	completed map[string]chan writeTask
+	// offset current offset that is writing
+	offset int
+
+	// writer the inner writer to handle actual writing
+	writer io.Writer
+
+	// writeItemQueue the queue to hold write items
+	writeItemQueue chan *writeItem
+
+	// batchLimit the limit of size of each batch write request
+	batchLimit int
+
+	// lingerTime the max delay for processing write items
+	lingerTime time.Duration
 }
 
-func newWalWriter() (*walWriter, error) {
+func NewWalWriter() (*WalWriter, error) {
 	c, err := newChunk(wal)
 	if err != nil {
 		return nil, err
 	}
-	chainedWriter := newChainedWalWriter(c)
-	writer := &walWriter{
-		chunk:       c,
-		offset:      0,
-		innerWriter: chainedWriter,
+	writer := &WalWriter{
+		chunk:          c,
+		offset:         0,
+		writeItemQueue: make(chan *writeItem),
+		batchLimit:     16 * 1024,
+		lingerTime:     100 * time.Millisecond,
 	}
+	// start batch processor
+	go writer.batchProcessor()
 	return writer, nil
 }
 
-func (w *walWriter) write(p []byte) (addr Address, err error) {
+// callback the callback function after async write finished
+type callback func(addr Address, err error)
+
+func (w *WalWriter) AsyncWrite(p []byte, completed chan error, callback callback) {
+	writeItem := newWriteItem(p, completed, callback)
+	w.writeItemQueue <- writeItem
+}
+
+func (w *WalWriter) batchProcessor() {
+	var batch []*writeItem
+	var length int
+	lingerTimer := time.NewTimer(0)
+	if !lingerTimer.Stop() {
+		<-lingerTimer.C
+	}
+	defer lingerTimer.Stop()
+
+	for {
+		select {
+		case item := <-w.writeItemQueue:
+			if length+len(item.block) >= w.batchLimit {
+				if err := w.batchWrite(batch, length); err != nil {
+					w.errHandler(err, batch)
+				}
+				// if !lingerTimer.Stop() {
+				// 	<-lingerTimer.C
+				// }
+				batch = make([]*writeItem, 0)
+				break
+			}
+			// not reach batch limit, append to batch
+			batch = append(batch, item)
+			length += len(item.block)
+			if len(batch) == 1 {
+				lingerTimer.Reset(w.lingerTime)
+			}
+		case <-lingerTimer.C:
+			if err := w.batchWrite(batch, length); err != nil {
+				w.errHandler(err, batch)
+			}
+			batch = make([]*writeItem, 0)
+		}
+	}
+	fmt.Println("Batch processor loop quit")
+}
+
+func (w *WalWriter) batchWrite(items []*writeItem, length int) (err error) {
 	// try rotate chunk if current chunk is nil
 	if w.chunk == nil {
 		err = w.rotateWal()
 		if err != nil {
-			return addr, err
+			w.errHandler(err, items)
+			return err
 		}
 	}
 
-	len := len(p)
-	// check if chunk is full
-	if w.offset+len >= w.chunk.capacity {
-		err = w.rotateWal()
-		if err != nil {
-			return addr, err
-		}
-	}
-	written, err := w.innerWriter.Write(p)
+	var f *os.File
+	f, err = os.OpenFile(chunkFileName(w.chunk.name, wal), os.O_WRONLY|os.O_APPEND, os.ModePerm)
 	if err != nil {
-		err2 := w.rotateWal()
-		if err != nil {
-			return addr, err2
+		w.errHandler(err, items)
+		return err
+	}
+	defer f.Close()
+
+	newWriter := bufio.NewWriterSize(f, length)
+	for _, item := range items {
+		if _, err = newWriter.Write(item.block); err != nil {
+			w.errHandler(err, items)
+			return err
 		}
-		return addr, err
 	}
-	addr = Address{
-		Chunk:  w.chunk.name,
-		Offset: w.offset,
-		Length: written,
+
+	if err = newWriter.Flush(); err != nil {
+		w.errHandler(err, items)
+		return err
 	}
-	w.offset += written
-	return addr, nil
+
+	// callback after writer finished
+	for _, item := range items {
+		written := len(item.block)
+		addr := Address{
+			Chunk:  w.chunk.name,
+			Offset: w.offset,
+			Length: written,
+		}
+		w.offset += written
+		if item.callback != nil {
+			item.callback(addr, nil)
+		}
+
+		// notify caller that the write completed
+		item.complete <- nil
+	}
+	return nil
 }
 
-func (w *walWriter) CompletedTask(ds string) chan writeTask {
-	return w.completed[ds]
+func (w *WalWriter) errHandler(err error, items []*writeItem) {
+	// callback for each write item to notify the writing error
+	for _, item := range items {
+		item.callback(Address{}, err)
+
+		// notify caller that the write completed
+		item.complete <- err
+	}
 }
 
-func (w *walWriter) rotateWal() error {
+func (w *WalWriter) rotateWal() error {
 	chunk, err := newChunk(wal)
 	if err != nil {
 		w.chunk = nil // set chunk nil as origin chunk is no longer available to write
 		return err
 	}
-	// set new chunk and new offset for innerWriter
+	// set new chunk and new offset for writer
 	w.chunk = chunk
 	w.offset = 0
-	w.innerWriter = newChainedWalWriter(chunk)
 	return nil
 }
 
-// newChainedWalWriter add crc32 check checksum segment and snappy compression when writing disk
-func newChainedWalWriter(c *chunk) io.Writer {
-	return &crc32Writer{
-		writer: &snappyWriter{
-			writer: &fileWriter{
-				file: chunkFileName(c.name, wal),
-			},
-		},
+type writeItem struct {
+	// block the bytes to write
+	block []byte
+
+	// complete the channel to notify task finished
+	complete chan error
+
+	// callback the callback function after write finished
+	callback callback
+}
+
+func newWriteItem(p []byte, completed chan error, callback callback) *writeItem {
+	chechsum := crc32.ChecksumIEEE(p)
+	return &writeItem{
+		block:    append(p, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum)),
+		complete: completed,
+		callback: callback,
 	}
 }
