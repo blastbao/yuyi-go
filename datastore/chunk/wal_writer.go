@@ -52,8 +52,8 @@ func NewWalWriter() (*WalWriter, error) {
 		chunk:          c,
 		offset:         0,
 		writeItemQueue: make(chan *writeItem),
-		batchLimit:     16 * 1024,
-		lingerTime:     100 * time.Millisecond,
+		batchLimit:     4 * 1024,
+		lingerTime:     20 * time.Millisecond,
 	}
 	// start batch processor
 	go writer.batchProcessor()
@@ -84,11 +84,12 @@ func (w *WalWriter) batchProcessor() {
 				if err := w.batchWrite(batch, length); err != nil {
 					w.errHandler(err, batch)
 				}
-				// if !lingerTimer.Stop() {
-				// 	<-lingerTimer.C
-				// }
+				if !lingerTimer.Stop() {
+					<-lingerTimer.C
+				}
+				// reset length and batch
+				length = 0
 				batch = make([]*writeItem, 0)
-				break
 			}
 			// not reach batch limit, append to batch
 			batch = append(batch, item)
@@ -100,6 +101,8 @@ func (w *WalWriter) batchProcessor() {
 			if err := w.batchWrite(batch, length); err != nil {
 				w.errHandler(err, batch)
 			}
+			// reset length and batch
+			length = 0
 			batch = make([]*writeItem, 0)
 		}
 	}

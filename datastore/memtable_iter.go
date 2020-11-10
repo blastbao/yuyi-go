@@ -90,7 +90,7 @@ func newCombinedIter(iters []*listIter) *combinedIter {
 		}
 	}
 	return &combinedIter{
-		minHeap: newMinHeap(len(iters)),
+		minHeap: minHeap,
 	}
 }
 
@@ -130,7 +130,7 @@ type minHeap struct {
 
 func newMinHeap(maxsize int) *minHeap {
 	minHeap := &minHeap{
-		content: make([]*combinedIterItem, maxsize),
+		content: make([]*combinedIterItem, 0),
 		size:    0,
 		maxsize: maxsize,
 	}
@@ -173,7 +173,7 @@ func (m *minHeap) swap(first, second int) {
 }
 
 func (m *minHeap) upHeapify(index int) {
-	for compareKVEntry(m.content[index].cur, m.content[m.parent(index)].cur) < 0 {
+	for m.compareContent(index, m.parent(index)) < 0 {
 		m.swap(index, m.parent(index))
 		index = m.parent(index)
 	}
@@ -185,19 +185,32 @@ func (m *minHeap) downHeapify(current int) {
 	}
 	smallest := current
 	leftChildIndex := m.leftchild(current)
-	rightRightIndex := m.rightchild(current)
+	rightChildIndex := m.rightchild(current)
 	// if current is smallest then return
-	if leftChildIndex < m.size && compareKVEntry(m.content[leftChildIndex].cur, m.content[smallest].cur) < 0 {
+	if leftChildIndex < m.size && m.compareContent(leftChildIndex, smallest) < 0 {
 		smallest = leftChildIndex
 	}
-	if rightRightIndex < m.size && compareKVEntry(m.content[rightRightIndex].cur, m.content[smallest].cur) < 0 {
-		smallest = rightRightIndex
+	if rightChildIndex < m.size && m.compareContent(rightChildIndex, smallest) < 0 {
+		smallest = rightChildIndex
 	}
 	if smallest != current {
 		m.swap(current, smallest)
 		m.downHeapify(smallest)
 	}
 	return
+}
+
+func (m *minHeap) compareContent(left, right int) int {
+	if m.content[left] == nil && m.content[right] == nil {
+		return 0
+	}
+	if m.content[left] == nil {
+		return 1
+	}
+	if m.content[right] == nil {
+		return -1
+	}
+	return compareKVEntry(m.content[left].cur, m.content[right].cur)
 }
 
 func (m *minHeap) remove() *combinedIterItem {
@@ -210,5 +223,8 @@ func (m *minHeap) remove() *combinedIterItem {
 }
 
 func (m *minHeap) peek() *combinedIterItem {
+	if len(m.content) == 0 {
+		return nil
+	}
 	return m.content[0]
 }

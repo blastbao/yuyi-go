@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -68,6 +69,8 @@ func TestReaderAndWriter(t *testing.T) {
 }
 
 func TestWalWriter(t *testing.T) {
+	runtime.GOMAXPROCS(runtime.NumCPU())
+
 	if _, err := os.Stat(folder); os.IsNotExist(err) {
 		os.Mkdir(folder, os.ModePerm)
 	}
@@ -82,7 +85,7 @@ func TestWalWriter(t *testing.T) {
 	count := 200
 	inputs := make([][]byte, count)
 	for i := 0; i < count; i++ {
-		input := randomBytes((i+1)*100, defaultLetters)
+		input := randomBytes(((i+1)%50)*100, defaultLetters)
 		writer.AsyncWrite(input, make(chan error, 1), nil)
 
 		fmt.Printf("Put key index %d\n", i)

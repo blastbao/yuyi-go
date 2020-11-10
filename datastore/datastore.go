@@ -29,10 +29,11 @@ var (
 	maxSeq = uint64(0xFFFFFFFFFFFFFFFF)
 
 	// register all active datastore
+	regMux sync.Mutex
 	stores = make([]*DataStore, 0)
 
 	done   = make(chan bool)
-	ticker = time.NewTicker(5 * time.Second)
+	ticker = time.NewTicker(1 * time.Second)
 )
 
 func init() {
@@ -92,11 +93,14 @@ type DataStore struct {
 	// ready if the datastore is stopped
 	stopped bool
 
-	// memTableMutex the lock for change sealed memory table
-	memTabbleMutex sync.Mutex
+	// mtMu the lock for change active and sealed memory table
+	mtMu sync.Mutex
 
-	// flushMutex the lock for checking if memory table is ready to flush
-	flushMutex sync.Mutex
+	// flushMu the lock for checking if memory table is ready to flush
+	flushMu sync.Mutex
+
+	// flushing the flag to mark the store is flushing memory tables to btree
+	flushing bool
 }
 
 // New create a new datastore
@@ -120,6 +124,7 @@ func New() (*DataStore, error) {
 		walWriter:           walWriter,
 		ready:               true,
 		stopped:             false,
+		flushing:            false,
 	}
 	datastore.initBackground()
 	return datastore, nil
@@ -128,7 +133,14 @@ func New() (*DataStore, error) {
 func (store *DataStore) initBackground() {
 	// start a goroutine to handle mutations' writing
 	go store.handleMutations()
+
+	// register store
+	regMux.Lock()
+	defer regMux.Unlock()
+	stores = append(stores, store)
 }
+
+var ErrMutationFailed = errors.New("DataStore mutation failed")
 
 func (store *DataStore) Put(key Key, value Value) error {
 	// create mutation for this put operation
@@ -140,12 +152,24 @@ func (store *DataStore) Put(key Key, value Value) error {
 	if err != nil {
 		// put operation failed, need stop the datastore
 		store.stop()
+		return ErrMutationFailed
 	}
 	return err
 }
 
-func (store *DataStore) Remove(key Key) {
-	return
+func (store *DataStore) Remove(key Key) error {
+	// create mutation for this put operation
+	entry := newKVEntry(key, nil, Remove)
+	mutation := newMutation(entry, 10*time.Second)
+
+	store.mutations <- mutation
+	err := mutation.wait()
+	if err != nil {
+		// put operation failed, need stop the datastore
+		store.stop()
+		return ErrMutationFailed
+	}
+	return err
 }
 
 func (store *DataStore) Has(key Key) (bool, error) {
@@ -225,8 +249,8 @@ func (store *DataStore) handleMutations() {
 func (store *DataStore) putActive(entry *KVEntry) {
 	size := entry.size()
 	for store.activeMemTable.capacity+size > store.memTableMaxCapacity {
-		store.memTabbleMutex.Lock()
-		defer store.memTabbleMutex.Unlock()
+		store.mtMu.Lock()
+		defer store.mtMu.Unlock()
 
 		// double check if need seal current active
 		if store.activeMemTable.capacity+size > store.memTableMaxCapacity {
@@ -300,7 +324,7 @@ type mutation struct {
 func newMutation(entry *KVEntry, duration time.Duration) *mutation {
 	return &mutation{
 		entry:    entry,
-		complete: make(chan error),
+		complete: make(chan error, 1), // channel with buffer 1 to avoid blocking callback
 		timeout:  time.After(duration),
 	}
 }
@@ -325,41 +349,63 @@ func (store *DataStore) newSeq() uint64 {
 }
 
 func (store *DataStore) checkForFlushing() {
-	store.flushMutex.Lock()
-	defer store.flushMutex.Unlock()
+	store.flushMu.Lock()
+	defer store.flushMu.Unlock()
 
 	if store.shouldFlush() {
+		store.markFlushing()
 		go store.flush()
 	}
 }
 
 func (store *DataStore) shouldFlush() bool {
-	return len(store.sealedMemTables) != 0 && store.btree.isDumping()
+	return len(store.sealedMemTables) != 0 && !store.flushing
 }
 
 func (store *DataStore) flush() {
-	sealed := store.sealedMemTables[0:]
+	defer store.unmarkFlushing()
+	sealedMemTables := store.sealedMemTables[0:]
+
+	// check if sealed memory table's last wal have been updated
+	for i, table := range sealedMemTables {
+		if table.lastSeq < store.committed {
+			// all remaining tables are ready to flush
+			if i != 0 {
+				sealedMemTables = sealedMemTables[i:]
+				break
+			}
+		}
+	}
 
 	dumper, err := newDumper(store.btree)
 	if err != nil {
 		// log error log
+		return
 	}
 
-	treeInfo, err := dumper.Dump(mergeMemTables(sealed))
+	treeInfo, err := dumper.Dump(mergeMemTables(sealedMemTables))
 	if err != nil {
 		// log error log
 	} else {
-		store.flushMutex.Lock()
-		defer store.flushMutex.Unlock()
+		store.mtMu.Lock()
+		defer store.mtMu.Unlock()
 
 		// update last tree info and
 		store.btree.lastTreeInfo = treeInfo
 
 		// release sealed memory table
-		remaining := len(store.sealedMemTables) - len(sealed)
+		remaining := len(store.sealedMemTables) - len(sealedMemTables)
 		store.sealedMemTables = store.sealedMemTables[0:remaining:remaining]
 	}
-	store.btree = nil
+	store.btree.dumper = nil
+}
+
+func (store *DataStore) markFlushing() {
+	store.flushing = true
+}
+
+func (store *DataStore) unmarkFlushing() {
+	store.flushing = false
 }
 
 func mergeMemTables(tables []*MemTable) []*KVEntry {

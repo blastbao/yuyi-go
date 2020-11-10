@@ -15,46 +15,43 @@
 package datastore
 
 import (
-	"bytes"
+	"fmt"
+	"runtime"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestPutEntries(t *testing.T) {
+	cpu := runtime.NumCPU()
+	runtime.GOMAXPROCS(cpu)
+
 	datastore, err := New()
 	if err != nil {
 		t.Error("datastore create failed")
 		return
 	}
-	allEntries := make([]*KVEntry, 0)
-outer:
-	for i := 0; i < 20; i++ {
-		entries := randomPutKVEntries(entriesCount)
-		allEntries = mergeEntries(allEntries, entries)
-
-		for _, entry := range entries {
-			datastore.Put(entry.Key, entry.TableValue.Value)
-		}
-
-		index := 0
-		// do list
-		var start Key
-		for {
-			listRes, err := datastore.List(start, nil, 1000)
-			if err != nil {
-				t.Error("btree list failed")
-				break outer
-			}
-			for _, pair := range listRes.pairs {
-				if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
-					t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
-					break outer
-				}
-				index++
-			}
-			start = *listRes.next
-			if start == nil {
-				break
-			}
-		}
+	var wg sync.WaitGroup
+	allEntries := make([][]*KVEntry, cpu)
+	for i := 0; i < cpu; i++ {
+		entries := randomPutKVEntries(2000)
+		allEntries[i] = entries
 	}
+	for i := 0; i < cpu; i++ {
+		wg.Add(1)
+		go func(j int) {
+			defer wg.Done()
+			fmt.Printf("Goroutine %d\n", j)
+
+			for j, entry := range allEntries[j] {
+				fmt.Printf("Put key %d\n", j)
+				datastore.Put(entry.Key, entry.TableValue.Value)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+
+	time.Sleep(30 * time.Second)
+	fmt.Println("Finished Put Test")
 }
