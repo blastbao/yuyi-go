@@ -15,7 +15,11 @@
 package chunk
 
 import (
+	"fmt"
+	"io/ioutil"
 	"os"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -32,7 +36,30 @@ var (
 	// maxCapacity set max capacity of each file to 512k
 	maxCapacity = 512 * 1024
 	folder      = os.TempDir()
+
+	// walSeq the sequence of wal chunk
+	walSeq = 0
+
+	// mutex
+	mu sync.Mutex
 )
+
+func init() {
+	// list wal folder to look for latest wal seq
+	files, err := ioutil.ReadDir(fmt.Sprintf("%s%s%s", folder, string(os.PathSeparator), chunkTypeFolder(wal)))
+	if err != nil {
+		// log critical error
+	}
+	// find last wal chunk file and get seq based in it's name
+	if len(files) != 0 {
+		file := files[len(files)-1]
+		seq, err := strconv.ParseInt(file.Name(), 16, 64)
+		if err != nil {
+			// log critical error
+		}
+		walSeq = int(seq)
+	}
+}
 
 type chunk struct {
 	name        uuid.UUID
@@ -46,7 +73,12 @@ type chunk struct {
 }
 
 func newChunk(chunkType ChunkType) (*chunk, error) {
-	name := uuid.New()
+	var name uuid.UUID
+	if chunkType == btree {
+		name = uuid.New()
+	} else if chunkType == wal {
+		name = fmt.Sprintf("0x%16x", walSeq)
+	}
 	_, err := os.Create(chunkFileName(name, chunkType))
 	if err != nil {
 		return nil, err
@@ -62,5 +94,16 @@ func newChunk(chunkType ChunkType) (*chunk, error) {
 }
 
 func chunkFileName(name uuid.UUID, chunkType ChunkType) string {
-	return folder + string(os.PathSeparator) + name.String()
+	return fmt.Sprintf("%s%s%s%s%s",
+		folder, string(os.PathSeparator), chunkTypeFolder(chunkType), string(os.PathSeparator), name.String())
+}
+
+func chunkTypeFolder(chunkType ChunkType) string {
+	var typeFolder string
+	if chunkType == wal {
+		typeFolder = "wal"
+	} else if chunkType == btree {
+		typeFolder = "btree"
+	}
+	return typeFolder
 }
