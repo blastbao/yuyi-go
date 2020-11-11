@@ -15,6 +15,7 @@
 package chunk
 
 import (
+	"encoding/binary"
 	"hash/crc32"
 	"io"
 	"os"
@@ -27,6 +28,12 @@ type crc32Writer struct {
 }
 
 func (w *crc32Writer) Write(p []byte) (n int, err error) {
+	// put length of block first
+	lenBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(lenBytes, uint32(len(p)+4)) // 4 is length checksum
+	p = append(lenBytes, p...)
+
+	// append checksum
 	chechsum := crc32.ChecksumIEEE(p)
 	p = append(p, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum))
 	return w.writer.Write(p)

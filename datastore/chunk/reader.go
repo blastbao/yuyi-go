@@ -42,7 +42,7 @@ func (r *crc32Reader) Read(addr Address) (p []byte, err error) {
 		return nil, CheckSumError{msg: "Invalid checksum"}
 	}
 
-	return p[0 : len-4 : len-4], nil
+	return p[4 : len-4 : len-4], nil // exclude length at head and checksum at tail
 }
 
 type snappyReader struct {

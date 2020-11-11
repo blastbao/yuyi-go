@@ -14,6 +14,18 @@
 
 package chunk
 
+import (
+	"bufio"
+	"os"
+
+	"github.com/google/uuid"
+)
+
+var (
+	// batchLen the max read length from wal chunk one round
+	batchLen = 64 * 1024
+)
+
 type walReader struct {
 	reader ChunkReader
 }
@@ -25,8 +37,22 @@ func NewWalReader() (*walReader, error) {
 	}, nil
 }
 
-func (r *walReader) Read(addr Address) (p []byte, err error) {
-	return r.reader.Read(addr)
+func (r *walReader) Read(chunk uuid.UUID, offset int) (p []byte, err error) {
+	f, err := os.Open(chunkFileName(chunk, wal))
+	defer f.Close()
+	if err != nil {
+		return nil, err
+	}
+	f.Seek(int64(offset), 0)
+
+	res := make([]byte, batchLen) // read max to batchLen one round
+
+	reader := bufio.NewReader(f)
+	n, err := reader.Read(res)
+	if n != batchLen {
+		res = res[0:n:n]
+	}
+	return res, nil
 }
 
 func newChainedWalReader() ChunkReader {

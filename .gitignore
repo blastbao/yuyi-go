@@ -16,3 +16,7 @@
 
 # Jetbrains related directories
 .idea/
+
+# Temp folder for chunk test
+tmp/btree
+tmp/wal

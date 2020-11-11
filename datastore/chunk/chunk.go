@@ -15,10 +15,10 @@
 package chunk
 
 import (
+	"encoding/binary"
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strconv"
 	"sync"
 	"time"
 
@@ -35,10 +35,10 @@ const (
 var (
 	// maxCapacity set max capacity of each file to 512k
 	maxCapacity = 512 * 1024
-	folder      = os.TempDir()
+	folder      = "/Users/yonlu/Documents/GitHub/yuyi-go/tmp/"
 
 	// walSeq the sequence of wal chunk
-	walSeq = 0
+	walSeq = uint64(1)
 
 	// mutex
 	mu sync.Mutex
@@ -53,11 +53,11 @@ func init() {
 	// find last wal chunk file and get seq based in it's name
 	if len(files) != 0 {
 		file := files[len(files)-1]
-		seq, err := strconv.ParseInt(file.Name(), 16, 64)
+		name, err := uuid.Parse(file.Name())
 		if err != nil {
 			// log critical error
 		}
-		walSeq = int(seq)
+		walSeq = binary.BigEndian.Uint64(name[8:16]) + 1 // get and increase wal seq
 	}
 }
 
@@ -73,11 +73,18 @@ type chunk struct {
 }
 
 func newChunk(chunkType ChunkType) (*chunk, error) {
+	mu.Lock()
+	defer mu.Unlock()
+
 	var name uuid.UUID
 	if chunkType == btree {
 		name = uuid.New()
 	} else if chunkType == wal {
-		name = fmt.Sprintf("0x%16x", walSeq)
+		name = uuid.New()
+		binary.BigEndian.PutUint64(name[0:8:8], 0)
+		binary.BigEndian.PutUint64(name[8:16:16], walSeq)
+
+		walSeq++
 	}
 	_, err := os.Create(chunkFileName(name, chunkType))
 	if err != nil {
