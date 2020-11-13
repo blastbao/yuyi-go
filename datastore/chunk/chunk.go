@@ -38,7 +38,7 @@ var (
 	folder      = "/Users/yonlu/Documents/GitHub/yuyi-go/tmp/"
 
 	// walSeq the sequence of wal chunk
-	walSeq = uint64(1)
+	walSeq = uint64(0)
 
 	// mutex
 	mu sync.Mutex
@@ -53,7 +53,7 @@ func init() {
 	// find last wal chunk file and get seq based in it's name
 	if len(files) != 0 {
 		file := files[len(files)-1]
-		name, err := uuid.Parse(file.Name())
+		name, err := uuid.Parse(file.Name()[:36]) // uuid string length is 36
 		if err != nil {
 			// log critical error
 		}
@@ -73,18 +73,15 @@ type chunk struct {
 }
 
 func newChunk(chunkType ChunkType) (*chunk, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
 	var name uuid.UUID
 	if chunkType == btree {
 		name = uuid.New()
 	} else if chunkType == wal {
-		name = uuid.New()
-		binary.BigEndian.PutUint64(name[0:8:8], 0)
-		binary.BigEndian.PutUint64(name[8:16:16], walSeq)
+		mu.Lock()
+		defer mu.Unlock()
 
-		walSeq++
+		walSeq++ // increase wal seq
+		name = newChunkNameWithSeq(walSeq)
 	}
 	_, err := os.Create(chunkFileName(name, chunkType))
 	if err != nil {
@@ -98,6 +95,13 @@ func newChunk(chunkType ChunkType) (*chunk, error) {
 		sealed:      false,
 	}
 	return c, nil
+}
+
+func newChunkNameWithSeq(seq uint64) uuid.UUID {
+	name := uuid.New()
+	binary.BigEndian.PutUint64(name[0:8:8], 0)
+	binary.BigEndian.PutUint64(name[8:16:16], seq)
+	return name
 }
 
 func chunkFileName(name uuid.UUID, chunkType ChunkType) string {

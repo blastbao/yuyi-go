@@ -15,6 +15,7 @@
 package chunk
 
 import (
+	"errors"
 	"hash/crc32"
 	"os"
 
@@ -29,6 +30,8 @@ type crc32Reader struct {
 	reader ChunkReader
 }
 
+var ErrUnexpectedCheckSum = errors.New("checksum mismatch")
+
 func (r *crc32Reader) Read(addr Address) (p []byte, err error) {
 	p, err = r.reader.Read(addr)
 	if err != nil {
@@ -39,7 +42,7 @@ func (r *crc32Reader) Read(addr Address) (p []byte, err error) {
 	chechsum := crc32.ChecksumIEEE(p[0 : len-4])
 	if p[len-4] != byte(chechsum>>24) || p[len-3] != byte(chechsum>>16) ||
 		p[len-2] != byte(chechsum>>8) || p[len-1] != byte(chechsum) {
-		return nil, CheckSumError{msg: "Invalid checksum"}
+		return nil, ErrUnexpectedCheckSum
 	}
 
 	return p[4 : len-4 : len-4], nil // exclude length at head and checksum at tail

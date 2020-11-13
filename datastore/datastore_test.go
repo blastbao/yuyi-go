@@ -20,17 +20,71 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"yuyi-go/datastore/chunk"
 )
 
 func TestPutEntries(t *testing.T) {
-	cpu := runtime.NumCPU()
-	runtime.GOMAXPROCS(cpu)
-
-	datastore, err := New()
+	datastore, err := New(false)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
 	}
+	err = preparePutEntries(datastore, t)
+	if err != nil {
+		t.Error("put entries failed")
+		return
+	}
+
+	time.Sleep(30 * time.Second)
+	fmt.Println("Finished Put Test")
+}
+
+func TestWalReplayer(t *testing.T) {
+	datastore, err := New(false)
+	if err != nil {
+		t.Error("datastore create failed")
+		return
+	}
+	err = preparePutEntries(datastore, t)
+	if err != nil {
+		t.Error("put entries failed")
+		return
+	}
+	// wait all wal write synced
+	time.Sleep(1 * time.Second)
+
+	oldName := datastore.name
+	// create another datastore instance
+	datastore, err = New(true)
+	if err != nil {
+		t.Error("datastore create failed")
+		return
+	}
+	replayer, err := chunk.NewWalReader(oldName, 1, 0)
+	if err != nil {
+		t.Error("create replayer failed")
+		return
+	}
+
+	complete := make(chan error, 1)
+	blockChan := replayer.Replay(complete)
+	for {
+		select {
+		case block := <-blockChan:
+			datastore.putActive(parseKVEntryBytes(block))
+		case err := <-complete:
+			if err != nil {
+				t.Error("put entries failed")
+			}
+			return
+		}
+	}
+}
+
+func preparePutEntries(store *DataStore, t *testing.T) error {
+	cpu := runtime.NumCPU()
+	runtime.GOMAXPROCS(cpu)
+
 	var wg sync.WaitGroup
 	allEntries := make([][]*KVEntry, cpu)
 	for i := 0; i < cpu; i++ {
@@ -45,13 +99,11 @@ func TestPutEntries(t *testing.T) {
 
 			for j, entry := range allEntries[j] {
 				fmt.Printf("Put key %d\n", j)
-				datastore.Put(entry.Key, entry.TableValue.Value)
+				store.Put(entry.Key, entry.TableValue.Value)
 			}
 		}(i)
 	}
 
 	wg.Wait()
-
-	time.Sleep(30 * time.Second)
-	fmt.Println("Finished Put Test")
+	return nil
 }

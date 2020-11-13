@@ -16,6 +16,7 @@ package chunk
 
 import (
 	"bufio"
+	"encoding/binary"
 	"fmt"
 	"hash/crc32"
 	"io"
@@ -193,6 +194,11 @@ type writeItem struct {
 }
 
 func newWriteItem(p []byte, completed chan error, callback callback) *writeItem {
+	// put length of block first
+	lenBytes := make([]byte, 4)
+	binary.BigEndian.PutUint32(lenBytes, uint32(len(p)+4)) // 4 is length checksum
+	p = append(lenBytes, p...)
+
 	chechsum := crc32.ChecksumIEEE(p)
 	return &writeItem{
 		block:    append(p, byte(chechsum>>24), byte(chechsum>>16), byte(chechsum>>8), byte(chechsum)),

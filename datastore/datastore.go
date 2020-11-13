@@ -104,7 +104,7 @@ type DataStore struct {
 }
 
 // New create a new datastore
-func New() (*DataStore, error) {
+func New(disableFlush bool) (*DataStore, error) {
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		return nil, err
@@ -126,7 +126,12 @@ func New() (*DataStore, error) {
 		stopped:             false,
 		flushing:            false,
 	}
-	datastore.initBackground()
+	if !disableFlush {
+		datastore.initBackground()
+	}
+
+	// replay wal from first
+	datastore.replayWal(1, 0)
 	return datastore, nil
 }
 
@@ -138,6 +143,24 @@ func (store *DataStore) initBackground() {
 	regMux.Lock()
 	defer regMux.Unlock()
 	stores = append(stores, store)
+}
+
+func (store *DataStore) replayWal(seq uint64, offset int) error {
+	replayer, err := chunk.NewWalReader(store.name, seq, offset)
+	if err != nil {
+		return err
+	}
+
+	complete := make(chan error, 1)
+	blockChan := replayer.Replay(complete)
+	for {
+		select {
+		case block := <-blockChan:
+			store.putActive(parseKVEntryBytes(block))
+		case err := <-complete:
+			return err
+		}
+	}
 }
 
 var ErrMutationFailed = errors.New("DataStore mutation failed")

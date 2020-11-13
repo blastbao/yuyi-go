@@ -16,6 +16,7 @@ package datastore
 
 import (
 	"bytes"
+	"encoding/binary"
 
 	"github.com/google/uuid"
 )
@@ -57,6 +58,23 @@ func newKVEntry(key Key, value Value, oper OPERATION) *KVEntry {
 			Value:     value,
 		},
 	}
+}
+
+func parseKVEntryBytes(block []byte) *KVEntry {
+	// parse key bytes
+	keyLen := binary.BigEndian.Uint32(block)
+	key := block[4 : 4+keyLen : 4+keyLen]
+
+	// parse table value bytes
+	oper := OPERATION(block[4+keyLen+1])
+
+	block = block[4+keyLen+1:]
+	var value Value
+	if oper == Put || oper == PutAbsent {
+		valueLen := binary.BigEndian.Uint32(block)
+		value = block[4 : 4+valueLen : 4+valueLen]
+	}
+	return newKVEntry(key, value, oper)
 }
 
 // buildBytes create bytes of the KVEntry. The bytes will be written in wal chunk
