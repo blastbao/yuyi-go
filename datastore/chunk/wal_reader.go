@@ -107,7 +107,6 @@ func (r *WalReader) replay(blockChan chan []byte, complete chan error) {
 			// failed to read block from wal chunk
 			complete <- err
 		}
-		block = block[4:length:length]
 
 		// check next block's ds id
 		if !r.owned(block) {
@@ -127,7 +126,7 @@ func (r *WalReader) replay(blockChan chan []byte, complete chan error) {
 		}
 
 		// enqueue block to blockChan without checksum
-		blockChan <- block[0 : blockLen-4 : blockLen-4]
+		blockChan <- block[16 : blockLen-4 : blockLen-4]
 	}
 }
 

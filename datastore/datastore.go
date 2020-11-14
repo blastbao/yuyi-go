@@ -104,7 +104,7 @@ type DataStore struct {
 }
 
 // New create a new datastore
-func New(disableFlush bool) (*DataStore, error) {
+func New(name uuid.UUID) (*DataStore, error) {
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		return nil, err
@@ -115,7 +115,7 @@ func New(disableFlush bool) (*DataStore, error) {
 		return nil, err
 	}
 	datastore := &DataStore{
-		name:                uuid.New(),
+		name:                name,
 		memTableMaxCapacity: 256 * 1024,
 		activeMemTable:      NewMemTable(),
 		sealedMemTables:     make([]*MemTable, 0),
@@ -126,9 +126,7 @@ func New(disableFlush bool) (*DataStore, error) {
 		stopped:             false,
 		flushing:            false,
 	}
-	if !disableFlush {
-		datastore.initBackground()
-	}
+	datastore.initBackground()
 
 	// replay wal from first
 	datastore.replayWal(1, 0)

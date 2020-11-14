@@ -66,7 +66,7 @@ func parseKVEntryBytes(block []byte) *KVEntry {
 	key := block[4 : 4+keyLen : 4+keyLen]
 
 	// parse table value bytes
-	oper := OPERATION(block[4+keyLen+1])
+	oper := OPERATION(block[4+keyLen])
 
 	block = block[4+keyLen+1:]
 	var value Value

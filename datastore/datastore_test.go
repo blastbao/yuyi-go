@@ -21,10 +21,13 @@ import (
 	"testing"
 	"time"
 	"yuyi-go/datastore/chunk"
+
+	"github.com/google/uuid"
 )
 
 func TestPutEntries(t *testing.T) {
-	datastore, err := New(false)
+	name := uuid.New()
+	datastore, err := New(name)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
@@ -40,7 +43,8 @@ func TestPutEntries(t *testing.T) {
 }
 
 func TestWalReplayer(t *testing.T) {
-	datastore, err := New(false)
+	name := uuid.New()
+	datastore, err := New(name)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
@@ -53,28 +57,29 @@ func TestWalReplayer(t *testing.T) {
 	// wait all wal write synced
 	time.Sleep(1 * time.Second)
 
-	oldName := datastore.name
-	// create another datastore instance
-	datastore, err = New(true)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
 	}
-	replayer, err := chunk.NewWalReader(oldName, 1, 0)
+	replayer, err := chunk.NewWalReader(datastore.name, 1, 0)
 	if err != nil {
 		t.Error("create replayer failed")
 		return
 	}
 
+	var count int
 	complete := make(chan error, 1)
 	blockChan := replayer.Replay(complete)
 	for {
 		select {
-		case block := <-blockChan:
-			datastore.putActive(parseKVEntryBytes(block))
+		case <-blockChan:
+			count++
 		case err := <-complete:
 			if err != nil {
 				t.Error("put entries failed")
+			}
+			if count != runtime.NumCPU()*2000 {
+				t.Error("Total count mismatch")
 			}
 			return
 		}
