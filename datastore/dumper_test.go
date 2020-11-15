@@ -27,6 +27,12 @@ import (
 var entriesCount = 2000
 
 func TestBTreePutEntries(t *testing.T) {
+	cfg, err := setupCfg()
+	if err != nil {
+		t.Error("Failed to initialize config")
+		return
+	}
+
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		t.Error("Create empty btree failed")
@@ -37,7 +43,7 @@ outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper, err := newDumper(btree)
+		dumper, err := newDumper(btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return
@@ -79,6 +85,12 @@ outer:
 }
 
 func TestBTreePutAndRemoveEntries(t *testing.T) {
+	cfg, err := setupCfg()
+	if err != nil {
+		t.Error("Failed to initialize config")
+		return
+	}
+
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		t.Error("Create empty btree failed")
@@ -89,7 +101,7 @@ func TestBTreePutAndRemoveEntries(t *testing.T) {
 	// init with 2000 put entries
 	entries := randomPutKVEntries(entriesCount)
 	allEntries = mergeEntries(allEntries, entries)
-	dumper, err := newDumper(btree)
+	dumper, err := newDumper(btree, cfg)
 	if err != nil {
 		t.Error("new dumper failed")
 		return
@@ -104,7 +116,7 @@ outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper, err := newDumper(btree)
+		dumper, err := newDumper(btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return
@@ -146,6 +158,12 @@ outer:
 }
 
 func TestBTreePutAndRemoveAll(t *testing.T) {
+	cfg, err := setupCfg()
+	if err != nil {
+		t.Error("Failed to initialize config")
+		return
+	}
+
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		t.Error("Create empty btree failed")
@@ -155,7 +173,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		// put entries
 		entries := randomPutKVEntries(entriesCount)
-		dumper, err := newDumper(btree)
+		dumper, err := newDumper(btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return
@@ -174,7 +192,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 				Value:     nil,
 			}
 		}
-		dumper, err = newDumper(btree)
+		dumper, err = newDumper(btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return

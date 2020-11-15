@@ -14,7 +14,10 @@
 
 package chunk
 
-import "io"
+import (
+	"io"
+	"yuyi-go/shared"
+)
 
 type BtreeWriter struct {
 	// chunk the chunk file that is writing to
@@ -28,10 +31,13 @@ type BtreeWriter struct {
 
 	// channel the channel to accept write request
 	channel chan []byte
+
+	// cfg the configuration instance
+	cfg *shared.Config
 }
 
-func NewBtreeWriter() (*BtreeWriter, error) {
-	c, err := newChunk(btree)
+func NewBtreeWriter(cfg *shared.Config) (*BtreeWriter, error) {
+	c, err := newChunk(btree, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +84,7 @@ func (w *BtreeWriter) Write(p []byte) (addr Address, err error) {
 }
 
 func (w *BtreeWriter) rotateBTree() error {
-	chunk, err := newChunk(btree)
+	chunk, err := newChunk(btree, w.cfg)
 	if err != nil {
 		w.chunk = nil // set chunk nil as origin chunk is no longer available to write
 		return err

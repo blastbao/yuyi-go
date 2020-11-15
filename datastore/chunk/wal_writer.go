@@ -22,6 +22,7 @@ import (
 	"io"
 	"os"
 	"time"
+	"yuyi-go/shared"
 )
 
 type WalWriter struct {
@@ -42,10 +43,13 @@ type WalWriter struct {
 
 	// lingerTime the max delay for processing write items
 	lingerTime time.Duration
+
+	// cfg the configuration instance
+	cfg *shared.Config
 }
 
-func NewWalWriter() (*WalWriter, error) {
-	c, err := newChunk(wal)
+func NewWalWriter(cfg *shared.Config) (*WalWriter, error) {
+	c, err := newChunk(wal, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -53,8 +57,9 @@ func NewWalWriter() (*WalWriter, error) {
 		chunk:          c,
 		offset:         0,
 		writeItemQueue: make(chan *writeItem),
-		batchLimit:     4 * 1024,
-		lingerTime:     20 * time.Millisecond,
+		cfg:            cfg,
+		batchLimit:     cfg.ChunkConfig.MaxBatchSize,
+		lingerTime:     cfg.ChunkConfig.MaxBatchDelay,
 	}
 	// start batch processor
 	go writer.batchProcessor()
@@ -171,7 +176,7 @@ func (w *WalWriter) errHandler(err error, items []*writeItem) {
 }
 
 func (w *WalWriter) rotateWal() error {
-	chunk, err := newChunk(wal)
+	chunk, err := newChunk(wal, w.cfg)
 	if err != nil {
 		w.chunk = nil // set chunk nil as origin chunk is no longer available to write
 		return err

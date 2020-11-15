@@ -21,6 +21,7 @@ import (
 	"os"
 	"sync"
 	"time"
+	"yuyi-go/shared"
 
 	"github.com/google/uuid"
 )
@@ -33,9 +34,13 @@ const (
 )
 
 var (
-	// maxCapacity set max capacity of each file to 512k
-	maxCapacity = 512 * 1024
-	folder      = "/Users/yonlu/Documents/GitHub/yuyi-go/tmp/"
+	// maxCapacity the max capacity of a chunk
+	maxCapacity int
+
+	// dataDir the directory to place all data
+	dataDir  string
+	walDir   = "wal"
+	btreeDir = "btree"
 
 	// walSeq the sequence of wal chunk
 	walSeq = uint64(0)
@@ -44,9 +49,12 @@ var (
 	mu sync.Mutex
 )
 
-func init() {
-	// list wal folder to look for latest wal seq
-	files, err := ioutil.ReadDir(fmt.Sprintf("%s%s%s", folder, string(os.PathSeparator), chunkTypeFolder(wal)))
+func initWithConfig(cfg *shared.Config) {
+	dataDir = cfg.Dir
+	maxCapacity = cfg.ChunkConfig.MaxCapacity
+
+	// list wal dataDir to look for latest wal seq
+	files, err := ioutil.ReadDir(fmt.Sprintf("%s%s%s", dataDir, string(os.PathSeparator), chunkTypeFolder(wal)))
 	if err != nil {
 		// log critical error
 	}
@@ -62,17 +70,32 @@ func init() {
 }
 
 type chunk struct {
-	name        uuid.UUID
-	chunkType   ChunkType
-	createdTime int64
-	sealedTime  int64
+	// name of the chunk
+	name uuid.UUID
 
-	capacity     int
-	sealed       bool
+	// chunkType the type of the chunk
+	chunkType ChunkType
+
+	// createTime the timestamp when the chunk is created
+	createTime int64
+
+	// sealedTime the timestamp when the chunk is sealed
+	sealedTime int64
+
+	// capacity max capacity of the chunk when allocated
+	capacity int
+
+	// sealed if the chunk is sealed and not allowed to change
+	sealed bool
+
+	// sealedLength the valid length of the chunk after sealed
 	sealedLength int
 }
 
-func newChunk(chunkType ChunkType) (*chunk, error) {
+func newChunk(chunkType ChunkType, cfg *shared.Config) (*chunk, error) {
+	if walSeq == 0 {
+		initWithConfig(cfg)
+	}
 	var name uuid.UUID
 	if chunkType == btree {
 		name = uuid.New()
@@ -89,10 +112,10 @@ func newChunk(chunkType ChunkType) (*chunk, error) {
 	}
 	// Todo: write metadata for the chunk
 	c := &chunk{
-		name:        name,
-		createdTime: time.Now().UnixNano(),
-		capacity:    maxCapacity,
-		sealed:      false,
+		name:       name,
+		createTime: time.Now().UnixNano(),
+		capacity:   maxCapacity,
+		sealed:     false,
 	}
 	return c, nil
 }
@@ -106,15 +129,15 @@ func newChunkNameWithSeq(seq uint64) uuid.UUID {
 
 func chunkFileName(name uuid.UUID, chunkType ChunkType) string {
 	return fmt.Sprintf("%s%s%s%s%s",
-		folder, string(os.PathSeparator), chunkTypeFolder(chunkType), string(os.PathSeparator), name.String())
+		dataDir, string(os.PathSeparator), chunkTypeFolder(chunkType), string(os.PathSeparator), name.String())
 }
 
 func chunkTypeFolder(chunkType ChunkType) string {
 	var typeFolder string
 	if chunkType == wal {
-		typeFolder = "wal"
+		typeFolder = walDir
 	} else if chunkType == btree {
-		typeFolder = "btree"
+		typeFolder = btreeDir
 	}
 	return typeFolder
 }

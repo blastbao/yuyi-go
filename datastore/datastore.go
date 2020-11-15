@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 	"yuyi-go/datastore/chunk"
+	"yuyi-go/shared"
 
 	"github.com/google/uuid"
 )
@@ -101,16 +102,19 @@ type DataStore struct {
 
 	// flushing the flag to mark the store is flushing memory tables to btree
 	flushing bool
+
+	// cfg the configuration instance
+	cfg *shared.Config
 }
 
 // New create a new datastore
-func New(name uuid.UUID) (*DataStore, error) {
+func New(name uuid.UUID, cfg *shared.Config) (*DataStore, error) {
 	btree, err := NewEmptyBTree()
 	if err != nil {
 		return nil, err
 	}
 
-	walWriter, err := chunk.NewWalWriter()
+	walWriter, err := chunk.NewWalWriter(cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -398,7 +402,7 @@ func (store *DataStore) flush() {
 		}
 	}
 
-	dumper, err := newDumper(store.btree)
+	dumper, err := newDumper(store.btree, store.cfg)
 	if err != nil {
 		// log error log
 		return

@@ -3,6 +3,7 @@ module yuyi-go
 go 1.15
 
 require (
-    github.com/google/uuid v1.0.0
-    github.com/golang/snappy v0.0.2
+	github.com/golang/snappy v0.0.2
+	github.com/google/uuid v1.0.0
+	gopkg.in/yaml.v2 v2.2.8
 )

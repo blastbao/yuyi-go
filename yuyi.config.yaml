@@ -1,0 +1,19 @@
+# This is the configuration file for the yuyi-go service.
+
+# Human-readable name for this member.
+name: 'yuyi'
+
+# The path to the data directory
+data-dir: '/data'
+
+# Chunk related configuration
+chunk:
+  # The max capacity of chunk, by default is 128M
+  max-capacity: 134217728 
+
+  # The max batch size of each write to chunk, by default is 4k
+  max-batch-size: 1024
+
+  # The max delay for chunk batch write, timeunit is microsecond
+  max-batch-delay: 20ms
+

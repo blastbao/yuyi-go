@@ -16,18 +16,26 @@ package datastore
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"sync"
 	"testing"
 	"time"
 	"yuyi-go/datastore/chunk"
+	"yuyi-go/shared"
 
 	"github.com/google/uuid"
 )
 
 func TestPutEntries(t *testing.T) {
+	cfg, err := setupCfg()
+	if err != nil {
+		t.Error("Failed to initialize config")
+		return
+	}
+
 	name := uuid.New()
-	datastore, err := New(name)
+	datastore, err := New(name, cfg)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
@@ -43,8 +51,14 @@ func TestPutEntries(t *testing.T) {
 }
 
 func TestWalReplayer(t *testing.T) {
+	cfg, err := setupCfg()
+	if err != nil {
+		t.Error("Failed to initialize config")
+		return
+	}
+
 	name := uuid.New()
-	datastore, err := New(name)
+	datastore, err := New(name, cfg)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
@@ -84,6 +98,40 @@ func TestWalReplayer(t *testing.T) {
 			return
 		}
 	}
+}
+
+func setupCfg() (*shared.Config, error) {
+	cfg, err := shared.NewConfig("../yuyi.config.yaml")
+	if err != nil {
+		return nil, err
+	}
+	cfg.Dir = "../tmp" // set dir to tmp
+
+	dataDir := cfg.Dir
+	err = os.RemoveAll(dataDir)
+	if err != nil {
+		return nil, err
+	}
+
+	// prepare data dir
+	err = os.Mkdir(dataDir, os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	// prepare wal dir
+	err = os.Mkdir(dataDir+"/wal", os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	// prepare btree dir
+	err = os.Mkdir(dataDir+"/btree", os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 func preparePutEntries(store *DataStore, t *testing.T) error {

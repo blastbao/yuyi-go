@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"yuyi-go/datastore/chunk"
+	"yuyi-go/shared"
 )
 
 type dumper struct {
@@ -46,10 +47,10 @@ type dumper struct {
 	indexPageSize int
 }
 
-func newDumper(btree *BTree) (*dumper, error) {
+func newDumper(btree *BTree, cfg *shared.Config) (*dumper, error) {
 	var root pageForDump
 	var depth int
-	writer, err := chunk.NewBtreeWriter()
+	writer, err := chunk.NewBtreeWriter(cfg)
 	if err != nil {
 		return nil, err
 	}
