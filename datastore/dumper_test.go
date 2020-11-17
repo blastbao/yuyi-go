@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"yuyi-go/datastore/chunk"
+
+	"go.uber.org/zap"
 )
 
 var entriesCount = 2000
@@ -33,7 +35,7 @@ func TestBTreePutEntries(t *testing.T) {
 		return
 	}
 
-	btree, err := NewEmptyBTree()
+	btree, err := NewEmptyBTree(zap.NewExample())
 	if err != nil {
 		t.Error("Create empty btree failed")
 		return
@@ -43,7 +45,7 @@ outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutKVEntries(entriesCount)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper, err := newDumper(btree, cfg)
+		dumper, err := newDumper(zap.NewExample(), btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return
@@ -91,7 +93,7 @@ func TestBTreePutAndRemoveEntries(t *testing.T) {
 		return
 	}
 
-	btree, err := NewEmptyBTree()
+	btree, err := NewEmptyBTree(zap.NewExample())
 	if err != nil {
 		t.Error("Create empty btree failed")
 		return
@@ -101,7 +103,7 @@ func TestBTreePutAndRemoveEntries(t *testing.T) {
 	// init with 2000 put entries
 	entries := randomPutKVEntries(entriesCount)
 	allEntries = mergeEntries(allEntries, entries)
-	dumper, err := newDumper(btree, cfg)
+	dumper, err := newDumper(zap.NewExample(), btree, cfg)
 	if err != nil {
 		t.Error("new dumper failed")
 		return
@@ -116,7 +118,7 @@ outer:
 	for i := 0; i < 20; i++ {
 		entries := randomPutAndRemoveKVEntries(allEntries, entriesCount, 20)
 		allEntries = mergeEntries(allEntries, entries)
-		dumper, err := newDumper(btree, cfg)
+		dumper, err := newDumper(zap.NewExample(), btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return
@@ -164,7 +166,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 		return
 	}
 
-	btree, err := NewEmptyBTree()
+	btree, err := NewEmptyBTree(zap.NewExample())
 	if err != nil {
 		t.Error("Create empty btree failed")
 		return
@@ -173,7 +175,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		// put entries
 		entries := randomPutKVEntries(entriesCount)
-		dumper, err := newDumper(btree, cfg)
+		dumper, err := newDumper(zap.NewExample(), btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return
@@ -192,7 +194,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 				Value:     nil,
 			}
 		}
-		dumper, err = newDumper(btree, cfg)
+		dumper, err = newDumper(zap.NewExample(), btree, cfg)
 		if err != nil {
 			t.Error("new dumper failed")
 			return

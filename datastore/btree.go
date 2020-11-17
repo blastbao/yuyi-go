@@ -14,9 +14,16 @@
 
 package datastore
 
-import "yuyi-go/datastore/chunk"
+import (
+	"yuyi-go/datastore/chunk"
+
+	"go.uber.org/zap"
+)
 
 type BTree struct {
+	// lg the logger instance
+	lg *zap.Logger
+
 	// lastTreeInfo last tree info after Cow synced from memory table.
 	lastTreeInfo *TreeInfo
 
@@ -27,12 +34,17 @@ type BTree struct {
 	reader chunk.ChunkReader
 }
 
-func NewEmptyBTree() (*BTree, error) {
+func NewEmptyBTree(lg *zap.Logger) (*BTree, error) {
+	if lg == nil {
+		lg = zap.NewNop()
+	}
+
 	reader, err := chunk.NewBtreeReader()
 	if err != nil {
 		return nil, err
 	}
 	return &BTree{
+		lg:           lg,
 		lastTreeInfo: nil,
 		dumper:       nil,
 		reader:       reader,

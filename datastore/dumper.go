@@ -19,9 +19,14 @@ import (
 
 	"yuyi-go/datastore/chunk"
 	"yuyi-go/shared"
+
+	"go.uber.org/zap"
 )
 
 type dumper struct {
+	// lg the logger instance
+	lg *zap.Logger
+
 	// btree the b+ tree instance for dumping
 	btree *BTree
 
@@ -47,7 +52,11 @@ type dumper struct {
 	indexPageSize int
 }
 
-func newDumper(btree *BTree, cfg *shared.Config) (*dumper, error) {
+func newDumper(lg *zap.Logger, btree *BTree, cfg *shared.Config) (*dumper, error) {
+	if lg == nil {
+		lg = zap.NewNop()
+	}
+
 	var root pageForDump
 	var depth int
 	writer, err := chunk.NewBtreeWriter(cfg)
@@ -65,6 +74,7 @@ func newDumper(btree *BTree, cfg *shared.Config) (*dumper, error) {
 		}
 		depth = btree.lastTreeInfo.depth
 		return &dumper{
+			lg:            lg,
 			btree:         btree,
 			root:          &root,
 			filter:        &dummyFilter{},
@@ -76,6 +86,7 @@ func newDumper(btree *BTree, cfg *shared.Config) (*dumper, error) {
 		}, nil
 	}
 	return &dumper{
+		lg:            lg,
 		btree:         btree,
 		root:          nil,
 		filter:        &dummyFilter{},

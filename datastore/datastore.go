@@ -23,6 +23,7 @@ import (
 	"yuyi-go/shared"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 var (
@@ -58,6 +59,9 @@ func background() {
 }
 
 type DataStore struct {
+	// lg the logger instance
+	lg *zap.Logger
+
 	// name the name of the datastore
 	name uuid.UUID
 
@@ -108,8 +112,11 @@ type DataStore struct {
 }
 
 // New create a new datastore
-func New(name uuid.UUID, cfg *shared.Config) (*DataStore, error) {
-	btree, err := NewEmptyBTree()
+func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error) {
+	if lg == nil {
+		lg = zap.NewNop()
+	}
+	btree, err := NewEmptyBTree(lg)
 	if err != nil {
 		return nil, err
 	}
@@ -119,6 +126,7 @@ func New(name uuid.UUID, cfg *shared.Config) (*DataStore, error) {
 		return nil, err
 	}
 	datastore := &DataStore{
+		lg:                  lg,
 		name:                name,
 		memTableMaxCapacity: 256 * 1024,
 		activeMemTable:      NewMemTable(),
@@ -402,7 +410,7 @@ func (store *DataStore) flush() {
 		}
 	}
 
-	dumper, err := newDumper(store.btree, store.cfg)
+	dumper, err := newDumper(store.lg, store.btree, store.cfg)
 	if err != nil {
 		// log error log
 		return

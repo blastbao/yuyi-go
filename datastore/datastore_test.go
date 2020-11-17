@@ -25,6 +25,7 @@ import (
 	"yuyi-go/shared"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 func TestPutEntries(t *testing.T) {
@@ -35,7 +36,7 @@ func TestPutEntries(t *testing.T) {
 	}
 
 	name := uuid.New()
-	datastore, err := New(name, cfg)
+	datastore, err := New(zap.NewExample(), name, cfg)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
@@ -58,7 +59,7 @@ func TestWalReplayer(t *testing.T) {
 	}
 
 	name := uuid.New()
-	datastore, err := New(name, cfg)
+	datastore, err := New(zap.NewExample(), name, cfg)
 	if err != nil {
 		t.Error("datastore create failed")
 		return
