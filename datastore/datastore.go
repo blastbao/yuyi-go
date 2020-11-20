@@ -15,12 +15,20 @@
 package datastore
 
 import (
+	"bytes"
+	"encoding/binary"
 	"errors"
+	"fmt"
+	"io"
+	"io/ioutil"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 	"yuyi-go/datastore/chunk"
 	"yuyi-go/shared"
+
+	"gopkg.in/yaml.v2"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -36,6 +44,10 @@ var (
 
 	done   = make(chan bool)
 	ticker = time.NewTicker(1 * time.Second)
+
+	pathSeparator = string(os.PathSeparator)
+
+	treeRecordDir = "treerecord"
 )
 
 func init() {
@@ -64,6 +76,9 @@ type DataStore struct {
 
 	// name the name of the datastore
 	name uuid.UUID
+
+	// nameString the name string format of the datastore
+	nameString string
 
 	// memTableMaxCapacity the max capacity of a memory table
 	memTableMaxCapacity int
@@ -116,18 +131,35 @@ func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error)
 	if lg == nil {
 		lg = zap.NewNop()
 	}
-	btree, err := NewEmptyBTree(lg)
+
+	// read last tree record
+	treeRecord, err := getLastTreeRecord(name.String(), cfg)
 	if err != nil {
 		return nil, err
 	}
 
+	// initialize btree
+	var btree *BTree
+	if treeRecord != nil {
+		btree, err = NewBTree(lg, &treeRecord.TreeInfo, cfg)
+	} else {
+		btree, err = NewBTree(lg, nil, cfg)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// initialize wal writer
 	walWriter, err := chunk.NewWalWriter(cfg)
 	if err != nil {
 		return nil, err
 	}
+
+	// create dataStore instance
 	datastore := &DataStore{
 		lg:                  lg,
 		name:                name,
+		nameString:          name.String(),
 		memTableMaxCapacity: 256 * 1024,
 		activeMemTable:      NewMemTable(),
 		sealedMemTables:     make([]*MemTable, 0),
@@ -137,12 +169,91 @@ func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error)
 		ready:               true,
 		stopped:             false,
 		flushing:            false,
+		cfg:                 cfg,
 	}
 	datastore.initBackground()
 
-	// replay wal from first
-	datastore.replayWal(1, 0)
+	// replay wal
+	if treeRecord == nil {
+		datastore.replayWal(1, 0)
+	} else {
+		datastore.replayWal(treeRecord.WalSequence, treeRecord.WalEndOffset)
+	}
 	return datastore, nil
+}
+
+type TreeRecordYaml struct {
+	// tree info related
+	TreeInfo TreeInfoYaml `yaml:"tree-info"`
+
+	// wal related
+	WalSequence      uint64 `yaml:"wal-sequence"`
+	WalChunkSequence uint64 `yaml:"wal-chunk-sequence"`
+	WalEndOffset     int    `yaml:"wal-end-offset"`
+}
+
+type TreeInfoYaml struct {
+	Sequence   int      `yaml:"sequence"`
+	RootPage   PageYaml `yaml:"root-page"`
+	FilterPage PageYaml `yaml:"filter-page"`
+	DeltaPage  PageYaml `yaml:"delta-page"`
+	TreeDepth  int      `yaml:"treeDepth"`
+}
+
+type PageYaml struct {
+	Chunk  string `yaml:"chunk"`
+	Offset int    `yaml:"offset"`
+	Length int    `yaml:"length"`
+}
+
+func (p *PageYaml) Address() (chunk.Address, error) {
+	chunkName, err := uuid.Parse(p.Chunk)
+	if err != nil {
+		return chunk.Address{}, err
+	}
+	return chunk.NewAddress(chunkName, p.Offset, p.Length), nil
+}
+
+var errNoValidTreeRecordFound = errors.New("No valid tree record found")
+
+func getLastTreeRecord(storeName string, cfg *shared.Config) (*TreeRecordYaml, error) {
+	// list tree record dir to get lastest tree record file
+	files, err := ioutil.ReadDir(treeRecordAbsoluteDir(storeName, cfg))
+	if err != nil {
+		// log critical error
+	}
+	// find last wal chunk file and get seq based in it's name
+	if len(files) != 0 {
+		var file *os.File
+		var treeRecord *TreeRecordYaml
+		for i := len(files) - 1; i >= 0; i-- {
+			file, err = os.Open(treeRecordAbsoluteDir(storeName, cfg) + pathSeparator + files[i].Name())
+			if err != nil {
+				// log critical err
+				continue
+			}
+			defer file.Close()
+
+			// read and parse content of the file
+			buf := bytes.NewBuffer(nil)
+			_, err = io.Copy(buf, file)
+			if err != nil {
+				// log cretical error
+			}
+			err = yaml.Unmarshal(buf.Bytes(), treeRecord)
+			if err != nil {
+				// log critical error
+			}
+		}
+		if treeRecord == nil {
+			// failed to find valid tree record
+			// log critical error
+			return nil, errNoValidTreeRecordFound
+		}
+		return treeRecord, nil
+	}
+	// not tree record found
+	return nil, nil
 }
 
 func (store *DataStore) initBackground() {
@@ -429,8 +540,58 @@ func (store *DataStore) flush() {
 		// release sealed memory table
 		remaining := len(store.sealedMemTables) - len(sealedMemTables)
 		store.sealedMemTables = store.sealedMemTables[0:remaining:remaining]
+
+		// sync tree info
+		store.syncTreeRecord(sealedMemTables[0].lastSeq, sealedMemTables[0].lastWalAddr)
 	}
 	store.btree.dumper = nil
+}
+
+func (store *DataStore) syncTreeRecord(walSeq uint64, walAddr chunk.Address) {
+	rootAddr := store.btree.lastTreeInfo.root.addr
+	rootYaml := PageYaml{
+		Chunk:  rootAddr.Chunk.String(),
+		Offset: rootAddr.Offset,
+		Length: rootAddr.Length,
+	}
+	treeInfoYaml := TreeInfoYaml{
+		Sequence:  store.btree.lastTreeInfo.sequence,
+		RootPage:  rootYaml,
+		TreeDepth: store.btree.lastTreeInfo.depth,
+	}
+	treeRecordYaml := TreeRecordYaml{
+		TreeInfo:         treeInfoYaml,
+		WalSequence:      walSeq,
+		WalChunkSequence: binary.BigEndian.Uint64(walAddr.Chunk[8:16:16]),
+		WalEndOffset:     walAddr.Offset + walAddr.Length,
+	}
+	out, err := yaml.Marshal(&treeRecordYaml)
+	if err != nil {
+		// log err here
+		return
+	}
+
+	dir := treeRecordAbsoluteDir(store.nameString, store.cfg)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		os.Mkdir(dir, os.ModePerm)
+	}
+	fPath := fmt.Sprintf("%s%s%016d.yaml", dir, pathSeparator, store.btree.lastTreeInfo.sequence)
+	var f *os.File
+	f, err = os.Create(fPath)
+	if err != nil {
+		// log err here
+		return
+	}
+	defer f.Close()
+	_, err = f.Write(out)
+	if err != nil {
+		// log err here
+		return
+	}
+}
+
+func treeRecordAbsoluteDir(storeName string, cfg *shared.Config) string {
+	return fmt.Sprintf("%s%s%s%s%s", cfg.Dir, pathSeparator, treeRecordDir, pathSeparator, storeName)
 }
 
 func (store *DataStore) markFlushing() {

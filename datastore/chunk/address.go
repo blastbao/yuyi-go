@@ -43,13 +43,33 @@ type Address struct {
 	Length int
 }
 
-// NewFakeAddr fake address have empty file and negative offset, which is used
+// NewFakeAddress fake address have empty file and negative offset, which is used
 // to present address only in memory.
-func NewFakeAddr() Address {
+func NewFakeAddress() Address {
 	atomic.AddInt32(&counter, 1)
 	return Address{
 		Chunk:  fakeFile,
 		Offset: -int(counter),
+	}
+}
+
+func NewAddress(chunk uuid.UUID, offset int, length int) Address {
+	return Address{
+		Chunk:  chunk,
+		Offset: offset,
+		Length: length,
+	}
+}
+
+func ParseAddress(input []byte) Address {
+	var chunk [16]byte
+	copy(chunk[0:], input)
+
+	buffer := bytes.NewBuffer(input[chunkLength : chunkLength+offsetSize+lengthSize : chunkLength+offsetSize+lengthSize])
+	return Address{
+		Chunk:  chunk,
+		Offset: int(shared.ReadInt32(buffer)),
+		Length: int(shared.ReadInt32(buffer)),
 	}
 }
 
@@ -68,16 +88,4 @@ func (addr Address) Bytes() []byte {
 
 func (addr *Address) Equals(addr2 Address) bool {
 	return bytes.Compare(addr.Chunk[0:], addr2.Chunk[0:]) == 0 && addr.Offset == addr2.Offset && addr.Length == addr2.Length
-}
-
-func NewAddress(input []byte) Address {
-	var chunk [16]byte
-	copy(chunk[0:], input)
-
-	buffer := bytes.NewBuffer(input[chunkLength : chunkLength+offsetSize+lengthSize : chunkLength+offsetSize+lengthSize])
-	return Address{
-		Chunk:  chunk,
-		Offset: int(shared.ReadInt32(buffer)),
-		Length: int(shared.ReadInt32(buffer)),
-	}
 }

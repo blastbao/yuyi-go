@@ -20,3 +20,4 @@
 # Temp folder for chunk test
 tmp/btree
 tmp/wal
+tmp/treerecord

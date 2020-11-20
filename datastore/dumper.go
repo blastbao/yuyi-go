@@ -165,7 +165,7 @@ func (dumper *dumper) sync(ctx *context) (*TreeInfo, error) {
 		}
 	}
 
-	// flush root
+	// flush root to chunk
 	var err error
 	dumper.root.addr, err = dumper.writePage(dumper.root)
 	if err != nil {
@@ -179,10 +179,18 @@ func (dumper *dumper) sync(ctx *context) (*TreeInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	// increase treeInfo sequence
+	var newSeq int
+	if dumper.btree.lastTreeInfo == nil {
+		newSeq = 0
+	} else {
+		newSeq = dumper.btree.lastTreeInfo.sequence + 1
+	}
 	return &TreeInfo{
-		root:   rootPage,
-		depth:  dumper.treeDepth,
-		filter: &dummyFilter{},
+		root:     rootPage,
+		depth:    dumper.treeDepth,
+		filter:   &dummyFilter{},
+		sequence: newSeq,
 	}, nil
 }
 

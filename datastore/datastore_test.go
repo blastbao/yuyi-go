@@ -47,7 +47,11 @@ func TestPutEntries(t *testing.T) {
 		return
 	}
 
+	// wait tree dumper finished
 	time.Sleep(30 * time.Second)
+
+	// init datastore with latest tree record
+	datastore, err = New(zap.NewExample(), name, cfg)
 	fmt.Println("Finished Put Test")
 }
 
@@ -128,6 +132,12 @@ func setupCfg() (*shared.Config, error) {
 
 	// prepare btree dir
 	err = os.Mkdir(dataDir+"/btree", os.ModePerm)
+	if err != nil {
+		return nil, err
+	}
+
+	// prepare tree info
+	err = os.Mkdir(dataDir+"/treerecord", os.ModePerm)
 	if err != nil {
 		return nil, err
 	}

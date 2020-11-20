@@ -35,7 +35,7 @@ func TestBTreePutEntries(t *testing.T) {
 		return
 	}
 
-	btree, err := NewEmptyBTree(zap.NewExample())
+	btree, err := NewBTree(zap.NewExample(), nil, cfg)
 	if err != nil {
 		t.Error("Create empty btree failed")
 		return
@@ -93,7 +93,7 @@ func TestBTreePutAndRemoveEntries(t *testing.T) {
 		return
 	}
 
-	btree, err := NewEmptyBTree(zap.NewExample())
+	btree, err := NewBTree(zap.NewExample(), nil, cfg)
 	if err != nil {
 		t.Error("Create empty btree failed")
 		return
@@ -166,7 +166,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 		return
 	}
 
-	btree, err := NewEmptyBTree(zap.NewExample())
+	btree, err := NewBTree(zap.NewExample(), nil, cfg)
 	if err != nil {
 		t.Error("Create empty btree failed")
 		return
@@ -360,7 +360,7 @@ func validateBTree(btree *BTree) bool {
 		if head.Type() == Root || head.Type() == Index {
 			// read child pages to do validation
 			for _, entry := range head.AllEntries() {
-				addr := chunk.NewAddress(entry.Value)
+				addr := chunk.ParseAddress(entry.Value)
 				page, err := btree.readPage(addr)
 				if err != nil {
 					return false

@@ -55,7 +55,7 @@ func NewPage(pageType PageType, pairs []*KVPair) *page {
 	return &page{
 		content: newEmptyContent(pageType),
 		entries: pairs,
-		addr:    chunk.NewFakeAddr(),
+		addr:    chunk.NewFakeAddress(),
 	}
 }
 
@@ -149,7 +149,7 @@ func (page *page) Value(index int) Value {
 // address get the child page address in the page with the specified index
 func (page *page) ChildAddress(index int) chunk.Address {
 	value := page.Value(index)
-	return chunk.NewAddress(value)
+	return chunk.ParseAddress(value)
 }
 
 // KVPair get key/value pair in the page with the specified index
@@ -204,7 +204,7 @@ func NewPageForDump(pageType PageType, pairs []*KVPair) *pageForDump {
 	page := page{
 		content: newEmptyContent(pageType),
 		entries: pairs,
-		addr:    chunk.NewFakeAddr(),
+		addr:    chunk.NewFakeAddress(),
 	}
 	return &pageForDump{
 		page:      page,

@@ -16,6 +16,7 @@ package datastore
 
 import (
 	"yuyi-go/datastore/chunk"
+	"yuyi-go/shared"
 
 	"go.uber.org/zap"
 )
@@ -32,9 +33,12 @@ type BTree struct {
 
 	// reader the reader utils to read pages from chunk
 	reader chunk.ChunkReader
+
+	// cfg the configuration instance
+	cfg *shared.Config
 }
 
-func NewEmptyBTree(lg *zap.Logger) (*BTree, error) {
+func NewBTree(lg *zap.Logger, treeInfoYaml *TreeInfoYaml, cfg *shared.Config) (*BTree, error) {
 	if lg == nil {
 		lg = zap.NewNop()
 	}
@@ -43,11 +47,39 @@ func NewEmptyBTree(lg *zap.Logger) (*BTree, error) {
 	if err != nil {
 		return nil, err
 	}
+	// create last tree info
+	var treeInfo *TreeInfo
+	if treeInfoYaml != nil {
+		rootAddr, err := treeInfoYaml.RootPage.Address()
+		if err != nil {
+			return nil, err
+		}
+		//		filterAddr, err := treeInfoYaml.filterPage.Address()
+		//		if err != nil {
+		//			return nil, err
+		//		}
+		content, err := reader.Read(rootAddr)
+		if err != nil {
+			return nil, err
+		}
+		rootPage := &page{
+			content: content,
+			entries: nil,
+			addr:    rootAddr,
+		}
+		treeInfo = &TreeInfo{
+			root:     rootPage,
+			depth:    treeInfoYaml.TreeDepth,
+			sequence: treeInfoYaml.Sequence,
+		}
+	}
+
 	return &BTree{
 		lg:           lg,
-		lastTreeInfo: nil,
+		lastTreeInfo: treeInfo,
 		dumper:       nil,
 		reader:       reader,
+		cfg:          cfg,
 	}, nil
 }
 
@@ -60,6 +92,9 @@ type TreeInfo struct {
 
 	// filter the filter for quick filter key
 	filter Filter
+
+	// sequence the sequence of the tree info
+	sequence int
 }
 
 type pathItem struct {
