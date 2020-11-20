@@ -15,11 +15,9 @@
 package datastore
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"sync"
@@ -155,6 +153,10 @@ func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error)
 		return nil, err
 	}
 
+	var walSeq uint64
+	if treeRecord != nil {
+		walSeq = treeRecord.WalSequence
+	}
 	// create dataStore instance
 	datastore := &DataStore{
 		lg:                  lg,
@@ -165,6 +167,8 @@ func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error)
 		sealedMemTables:     make([]*MemTable, 0),
 		btree:               btree,
 		mutations:           make(chan *mutation),
+		committed:           walSeq,
+		uncommitted:         walSeq,
 		walWriter:           walWriter,
 		ready:               true,
 		stopped:             false,
@@ -177,7 +181,7 @@ func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error)
 	if treeRecord == nil {
 		datastore.replayWal(1, 0)
 	} else {
-		datastore.replayWal(treeRecord.WalSequence, treeRecord.WalEndOffset)
+		datastore.replayWal(treeRecord.WalChunkSequence, treeRecord.WalEndOffset)
 	}
 	return datastore, nil
 }
@@ -224,33 +228,26 @@ func getLastTreeRecord(storeName string, cfg *shared.Config) (*TreeRecordYaml, e
 	}
 	// find last wal chunk file and get seq based in it's name
 	if len(files) != 0 {
-		var file *os.File
-		var treeRecord *TreeRecordYaml
+		var treeRecord TreeRecordYaml
 		for i := len(files) - 1; i >= 0; i-- {
-			file, err = os.Open(treeRecordAbsoluteDir(storeName, cfg) + pathSeparator + files[i].Name())
+			content, err := ioutil.ReadFile(treeRecordAbsoluteDir(storeName, cfg) + pathSeparator + files[i].Name())
 			if err != nil {
-				// log critical err
-				continue
+				return nil, err
 			}
-			defer file.Close()
-
-			// read and parse content of the file
-			buf := bytes.NewBuffer(nil)
-			_, err = io.Copy(buf, file)
-			if err != nil {
-				// log cretical error
-			}
-			err = yaml.Unmarshal(buf.Bytes(), treeRecord)
+			treeRecord = TreeRecordYaml{}
+			err = yaml.Unmarshal(content, &treeRecord)
 			if err != nil {
 				// log critical error
+				continue
 			}
+			break
 		}
-		if treeRecord == nil {
+		if (treeRecord == TreeRecordYaml{}) {
 			// failed to find valid tree record
 			// log critical error
 			return nil, errNoValidTreeRecordFound
 		}
-		return treeRecord, nil
+		return &treeRecord, nil
 	}
 	// not tree record found
 	return nil, nil
@@ -277,6 +274,7 @@ func (store *DataStore) replayWal(seq uint64, offset int) error {
 	for {
 		select {
 		case block := <-blockChan:
+			// Todo: active memory table's last wal address should be updated here
 			store.putActive(parseKVEntryBytes(block))
 		case err := <-complete:
 			return err
