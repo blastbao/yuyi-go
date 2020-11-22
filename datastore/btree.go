@@ -93,6 +93,9 @@ type TreeInfo struct {
 	// filter the filter for quick filter key
 	filter Filter
 
+	// walSequence the wal sequence of the tree info
+	walSequence uint64
+
 	// sequence the sequence of the tree info
 	sequence int
 }
@@ -146,11 +149,43 @@ func (tree *BTree) Get(key *Key) (Value, error) {
 
 type ListResult struct {
 	pairs []*KVPair
-	next  *Key
+	next  Key
+}
+
+func (r *ListResult) iterator() *ListResultIter {
+	return &ListResultIter{
+		res:   r,
+		index: 0,
+	}
+}
+
+type ListResultIter struct {
+	res   *ListResult
+	index int
+}
+
+func (iterator *ListResultIter) hasNext() bool {
+	return iterator.index < len(iterator.res.pairs)
+}
+
+func (iterator *ListResultIter) next() *KVEntry {
+	entry := &KVEntry{
+		Key: iterator.res.pairs[iterator.index].Key,
+		TableValue: TableValue{
+			Operation: Put,
+			Value:     iterator.res.pairs[iterator.index].Value,
+		},
+	}
+	iterator.index++
+	return entry
 }
 
 func (tree *BTree) List(start Key, end Key, max int) (*ListResult, error) {
 	treeInfo := tree.lastTreeInfo
+	return tree.list(treeInfo, start, end, max)
+}
+
+func (tree *BTree) list(treeInfo *TreeInfo, start Key, end Key, max int) (*ListResult, error) {
 	if treeInfo == nil || treeInfo.root == nil || treeInfo.root.KVPairsCount() == 0 {
 		return &ListResult{
 			pairs: []*KVPair{},
@@ -163,7 +198,7 @@ func (tree *BTree) List(start Key, end Key, max int) (*ListResult, error) {
 		start = []byte{}
 	}
 
-	path, err := tree.findPath(tree.lastTreeInfo, &start)
+	path, err := tree.findPath(treeInfo, &start)
 	if err != nil {
 		return nil, err
 	}
@@ -207,9 +242,8 @@ outer:
 		pairsCount = leaf.KVPairsCount()
 		startIndex = 0
 	}
-	return &ListResult{res, &next}, nil
+	return &ListResult{res, next}, nil
 }
-
 func (tree *BTree) ReverseList(start Key, end Key, max int) []KVPair {
 	return nil
 }

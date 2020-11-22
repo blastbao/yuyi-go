@@ -39,8 +39,16 @@ func newListIter(list *SkipList, start Key, end Key, seq uint64) *listIter {
 }
 
 func (iter *listIter) hasNext() bool {
-	if iter.current == nil || iter.current.next == nil {
-		return false
+	for {
+		if iter.current == nil || iter.current.next == nil {
+			return false
+		}
+		// skip entry with larger seq and Remove entry
+		if iter.current.next.seq > iter.seq || iter.current.next.value.Operation == Remove {
+			iter.current = iter.current.next
+			continue
+		}
+		break
 	}
 	if iter.endKey != nil {
 		n := iter.current.next
@@ -72,14 +80,14 @@ func (iter *listIter) next() *KVEntry {
 
 type combinedIterItem struct {
 	cur  *KVEntry
-	iter *listIter
+	iter iter
 }
 
 type combinedIter struct {
 	minHeap *minHeap
 }
 
-func newCombinedIter(iters []*listIter) *combinedIter {
+func newCombinedIter(iters ...iter) *combinedIter {
 	minHeap := newMinHeap(len(iters))
 	for _, iter := range iters {
 		if iter.hasNext() {
@@ -101,8 +109,14 @@ func (iter *combinedIter) hasNext() bool {
 func (iter *combinedIter) next() *KVEntry {
 	entry := iter.nextEntry()
 	for {
-		top := iter.minHeap.peek()
+		// check if need skip current entry
+		if entry.TableValue.Operation == Remove {
+			entry = iter.nextEntry()
+			continue
+		}
+
 		// check if top entry have same key, need move on to next
+		top := iter.minHeap.peek()
 		if top == nil || entry.Key.Compare(top.cur.Key) != 0 {
 			break
 		}

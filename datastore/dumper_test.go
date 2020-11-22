@@ -50,7 +50,7 @@ outer:
 			t.Error("new dumper failed")
 			return
 		}
-		treeInfo, err := dumper.Dump(entries)
+		treeInfo, err := dumper.Dump(entries, 0)
 		if err != nil {
 			t.Error("btree dump failed")
 			break outer
@@ -78,7 +78,7 @@ outer:
 				}
 				index++
 			}
-			start = *listRes.next
+			start = listRes.next
 			if start == nil {
 				break
 			}
@@ -108,7 +108,7 @@ func TestBTreePutAndRemoveEntries(t *testing.T) {
 		t.Error("new dumper failed")
 		return
 	}
-	treeInfo, err := dumper.Dump(entries)
+	treeInfo, err := dumper.Dump(entries, 0)
 	if err != nil {
 		t.Error("btree dump failed")
 		return
@@ -123,7 +123,7 @@ outer:
 			t.Error("new dumper failed")
 			return
 		}
-		treeInfo, err := dumper.Dump(entries)
+		treeInfo, err := dumper.Dump(entries, 0)
 		if err != nil {
 			t.Error("btree dump failed ")
 			break outer
@@ -151,7 +151,7 @@ outer:
 				}
 				index++
 			}
-			start = *listRes.next
+			start = listRes.next
 			if start == nil {
 				break
 			}
@@ -180,7 +180,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 			t.Error("new dumper failed")
 			return
 		}
-		treeInfo, err := dumper.Dump(entries)
+		treeInfo, err := dumper.Dump(entries, 0)
 		if err != nil {
 			t.Error("btree dump failed")
 			return
@@ -199,7 +199,7 @@ func TestBTreePutAndRemoveAll(t *testing.T) {
 			t.Error("new dumper failed")
 			return
 		}
-		treeInfo, err = dumper.Dump(entries)
+		treeInfo, err = dumper.Dump(entries, 0)
 		if err != nil {
 			t.Error("btree dump failed")
 			return

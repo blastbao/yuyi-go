@@ -98,7 +98,7 @@ func newDumper(lg *zap.Logger, btree *BTree, cfg *shared.Config) (*dumper, error
 	}, nil
 }
 
-func (dumper *dumper) Dump(entries []*KVEntry) (*TreeInfo, error) {
+func (dumper *dumper) Dump(entries []*KVEntry, lastWalSeq uint64) (*TreeInfo, error) {
 	ctx := &context{
 		path:      nil,
 		committed: map[int]map[chunk.Address][]*pageForDump{},
@@ -131,10 +131,10 @@ func (dumper *dumper) Dump(entries []*KVEntry) (*TreeInfo, error) {
 	}
 
 	// handle root split and sync
-	return dumper.sync(ctx)
+	return dumper.sync(ctx, lastWalSeq)
 }
 
-func (dumper *dumper) sync(ctx *context) (*TreeInfo, error) {
+func (dumper *dumper) sync(ctx *context, lastWalSeq uint64) (*TreeInfo, error) {
 	for {
 		if dumper.root.size > dumper.indexPageSize {
 			splitPoints := dumper.calculateSplitPoints(dumper.root, dumper.indexPageSize)
@@ -187,10 +187,11 @@ func (dumper *dumper) sync(ctx *context) (*TreeInfo, error) {
 		newSeq = dumper.btree.lastTreeInfo.sequence + 1
 	}
 	return &TreeInfo{
-		root:     rootPage,
-		depth:    dumper.treeDepth,
-		filter:   &dummyFilter{},
-		sequence: newSeq,
+		root:        rootPage,
+		depth:       dumper.treeDepth,
+		filter:      &dummyFilter{},
+		walSequence: lastWalSeq,
+		sequence:    newSeq,
 	}, nil
 }
 

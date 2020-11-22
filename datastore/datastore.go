@@ -357,18 +357,59 @@ func (store *DataStore) Get(key Key) (Value, error) {
 }
 
 func (store *DataStore) List(start Key, end Key, max int) (*ListResult, error) {
-	// seq := store.seq
-	// activeIter := store.activeMemTable.List(start, end, seq)
-	// sealedIter := make([]*memtable.Iterator, 0)
-	// for _, memtable := range store.sealedMemTables {
-	// 	sealedIter = append(sealedIter, memtable.List(start, end, seq))
-	// }
-	// resFromTree := store.btree.List(start, end, max)
+	var iterator iter
+	var next Key
+	for {
+		iters := make([]iter, 0)
+		committed := store.committed
 
-	// res := make([]*memtable.KVPair, 0)
-	// found := 0
-	// Todo: implement min heap for merging result together
-	return nil, nil
+		iters = append(iters, store.activeMemTable.List(start, end, committed))
+		for _, memtable := range store.sealedMemTables {
+			iters = append(iters, memtable.List(start, end, committed))
+		}
+		treeInfo := store.btree.lastTreeInfo
+		if treeInfo.walSequence > committed {
+			// current tree contains uncommitted content, retry list
+			continue
+		}
+		resFromTree, err := store.btree.list(treeInfo, start, end, max)
+		if err != nil {
+			// log error here
+			return nil, err
+		}
+		next = resFromTree.next
+		iters = append(iters, resFromTree.iterator())
+
+		iterator = newCombinedIter(iters...)
+		break
+	}
+
+	res := make([]*KVPair, 0)
+	found := 0
+	for {
+		if iterator.hasNext() && found < max {
+			entry := iterator.next()
+			res = append(res, &KVPair{
+				Key:   entry.Key,
+				Value: entry.TableValue.Value,
+			})
+			found++
+			continue
+		}
+		break
+	}
+	// prepare next key of the list result
+	if iterator.hasNext() {
+		entry := iterator.next()
+		compareRes := entry.Key.Compare(next)
+		if compareRes <= 0 {
+			next = entry.Key
+		}
+	}
+	return &ListResult{
+		pairs: res,
+		next:  next,
+	}, nil
 }
 
 func (store *DataStore) ReverseList(start Key, end Value, max uint16) (*ListResult, error) {
@@ -525,7 +566,7 @@ func (store *DataStore) flush() {
 		return
 	}
 
-	treeInfo, err := dumper.Dump(mergeMemTables(sealedMemTables))
+	treeInfo, err := dumper.Dump(mergeMemTables(sealedMemTables), sealedMemTables[0].lastSeq)
 	if err != nil {
 		// log error log
 	} else {
@@ -602,12 +643,12 @@ func (store *DataStore) unmarkFlushing() {
 
 func mergeMemTables(tables []*MemTable) []*KVEntry {
 	// new combined iterator
-	iters := make([]*listIter, len(tables))
+	iters := make([]iter, len(tables))
 	for i, table := range tables {
 		iters[i] = table.newMemTableIter(nil, nil, maxSeq)
 	}
 
-	combinedIter := newCombinedIter(iters)
+	combinedIter := newCombinedIter(iters...)
 	res := make([]*KVEntry, 0)
 	for {
 		if combinedIter.hasNext() {

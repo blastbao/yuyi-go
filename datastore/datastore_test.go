@@ -15,6 +15,7 @@
 package datastore
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"runtime"
@@ -41,7 +42,7 @@ func TestPutEntries(t *testing.T) {
 		t.Error("datastore create failed")
 		return
 	}
-	err = preparePutEntries(datastore, t)
+	allEntries, err := preparePutEntries(datastore, t)
 	if err != nil {
 		t.Error("put entries failed")
 		return
@@ -52,6 +53,33 @@ func TestPutEntries(t *testing.T) {
 
 	// init datastore with latest tree record
 	datastore, err = New(zap.NewExample(), name, cfg)
+	if err != nil {
+		t.Error("datastore create failed")
+		return
+	}
+
+	index := 0
+	// do list
+	var start Key
+outer:
+	for {
+		listRes, err := datastore.List(start, nil, 1000)
+		if err != nil {
+			t.Error("btree list failed")
+			break outer
+		}
+		for _, pair := range listRes.pairs {
+			if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
+				t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
+				break outer
+			}
+			index++
+		}
+		start = listRes.next
+		if start == nil {
+			break
+		}
+	}
 	fmt.Println("Finished Put Test")
 }
 
@@ -68,7 +96,7 @@ func TestWalReplayer(t *testing.T) {
 		t.Error("datastore create failed")
 		return
 	}
-	err = preparePutEntries(datastore, t)
+	_, err = preparePutEntries(datastore, t)
 	if err != nil {
 		t.Error("put entries failed")
 		return
@@ -145,14 +173,16 @@ func setupCfg() (*shared.Config, error) {
 	return cfg, nil
 }
 
-func preparePutEntries(store *DataStore, t *testing.T) error {
+func preparePutEntries(store *DataStore, t *testing.T) ([]*KVEntry, error) {
 	cpu := runtime.NumCPU()
 	runtime.GOMAXPROCS(cpu)
 
 	var wg sync.WaitGroup
+	res := make([]*KVEntry, 0)
 	allEntries := make([][]*KVEntry, cpu)
 	for i := 0; i < cpu; i++ {
 		entries := randomPutKVEntries(2000)
+		res = mergeEntries(res, entries)
 		allEntries[i] = entries
 	}
 	for i := 0; i < cpu; i++ {
@@ -167,7 +197,6 @@ func preparePutEntries(store *DataStore, t *testing.T) error {
 			}
 		}(i)
 	}
-
 	wg.Wait()
-	return nil
+	return res, nil
 }
