@@ -101,6 +101,9 @@ outer:
 			break
 		}
 	}
+	if index != runtime.NumCPU()*2000 {
+		t.Error("Count mismatch")
+	}
 	fmt.Println("Finished Put Test")
 }
 

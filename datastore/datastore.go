@@ -464,8 +464,8 @@ func (store *DataStore) asyncWriteCallback(addr chunk.Address, err error) {
 		return
 	}
 	// update wal address in memory table and increase committed sequence
-	store.updateWalAddr(addr)
 	store.committed++
+	store.updateWalAddr(addr)
 }
 
 var ErrUpdateWalAddr = errors.New("Update wal addr for memory table failed")
