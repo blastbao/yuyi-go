@@ -55,7 +55,7 @@ func NewWalReader(ds uuid.UUID, startSeq uint64, offset int) (*WalReader, error)
 
 func (r *WalReader) Replay(complete chan error) (blockChan chan []byte) {
 	// start a goroutine to replay wal async
-	blockChan = make(chan []byte, 10) // Todo: make the chan bufferred length configuratable
+	blockChan = make(chan []byte, 1) // Todo: make the chan bufferred length configuratable
 	go r.replay(blockChan, complete)
 	return blockChan
 }
@@ -83,7 +83,7 @@ func (r *WalReader) replay(blockChan chan []byte, complete chan error) {
 
 		// check if all chunk replayed
 		if r.seq > r.lastSeq {
-			complete <- nil
+			close(blockChan)
 			return
 		}
 

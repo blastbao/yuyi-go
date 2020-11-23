@@ -49,13 +49,33 @@ func TestPutEntries(t *testing.T) {
 	}
 
 	// wait tree dumper finished
-	time.Sleep(30 * time.Second)
+	time.Sleep(15 * time.Second)
 
 	// init datastore with latest tree record
-	datastore, err = New(zap.NewExample(), name, cfg)
+	datastore2, err := New(zap.NewExample(), name, cfg)
 	if err != nil {
-		t.Error("datastore create failed")
+		t.Error("datastore2 create failed")
 		return
+	}
+
+	// compare mem table between datastore and datastore2
+	iter1 := datastore.activeMemTable.List(nil, nil, maxSeq)
+	iter2 := datastore2.activeMemTable.List(nil, nil, maxSeq)
+	for {
+		if iter1.hasNext() && iter2.hasNext() {
+			key1 := iter1.next().Key
+			key2 := iter2.next().Key
+			if bytes.Compare(key1, key2) != 0 {
+				t.Error("mem table validate failed.")
+				return
+			}
+		} else {
+			if (iter1.hasNext() && !iter2.hasNext()) || (!iter1.hasNext() && iter2.hasNext()) {
+				t.Error("mem table validate failed.")
+			} else {
+				break
+			}
+		}
 	}
 
 	index := 0
@@ -63,15 +83,16 @@ func TestPutEntries(t *testing.T) {
 	var start Key
 outer:
 	for {
-		listRes, err := datastore.List(start, nil, 1000)
+		listRes, err := datastore2.List(start, nil, 32000)
 		if err != nil {
 			t.Error("btree list failed")
 			break outer
 		}
 		for _, pair := range listRes.pairs {
 			if bytes.Compare(allEntries[index].Key, pair.Key) != 0 {
-				t.Error("key invalid", "\n", allEntries[index].Key, "\n", pair.Key)
-				break outer
+				index++
+				t.Error("key invalid", "\n", string(allEntries[index].Key), "\n", string(pair.Key))
+				// break outer
 			}
 			index++
 		}
@@ -119,14 +140,17 @@ func TestWalReplayer(t *testing.T) {
 	blockChan := replayer.Replay(complete)
 	for {
 		select {
-		case <-blockChan:
+		case _, ok := <-blockChan:
+			if !ok {
+				if count != runtime.NumCPU()*100 {
+					t.Error("Total count mismatch")
+				}
+				return
+			}
 			count++
 		case err := <-complete:
 			if err != nil {
 				t.Error("put entries failed")
-			}
-			if count != runtime.NumCPU()*2000 {
-				t.Error("Total count mismatch")
 			}
 			return
 		}

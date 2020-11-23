@@ -14,7 +14,9 @@
 
 package datastore
 
-import "fmt"
+import (
+	"fmt"
+)
 
 type iter interface {
 	hasNext() bool
@@ -29,10 +31,18 @@ type listIter struct {
 }
 
 func newListIter(list *SkipList, start Key, end Key, seq uint64) *listIter {
-	pre := list.findPredecessor(start, seq)
+	cur := list.findPredecessor(start, seq)
+	if start != nil {
+		for {
+			if cur == nil || cur.key.Compare(start) >= 0 {
+				break
+			}
+			cur = cur.next
+		}
+	}
 	return &listIter{
 		skipList: list,
-		current:  pre,
+		current:  cur,
 		endKey:   end,
 		seq:      seq,
 	}
@@ -40,19 +50,19 @@ func newListIter(list *SkipList, start Key, end Key, seq uint64) *listIter {
 
 func (iter *listIter) hasNext() bool {
 	for {
-		if iter.current == nil || iter.current.next == nil {
+		if iter.current == nil {
 			return false
 		}
-		// skip entry with larger seq and Remove entry
-		if iter.current.next.seq > iter.seq || iter.current.next.value.Operation == Remove {
+		// skip entry have nil key, larger seq and Remove entry
+		if iter.current.key == nil ||
+			(iter.current.next != nil && (iter.current.next.seq > iter.seq || iter.current.next.value.Operation == Remove)) {
 			iter.current = iter.current.next
 			continue
 		}
 		break
 	}
 	if iter.endKey != nil {
-		n := iter.current.next
-		return compareKeyAndSeq(n.key, n.seq, iter.endKey, iter.seq) < 0
+		return compareKeyAndSeq(iter.current.key, iter.current.seq, iter.endKey, iter.seq) < 0
 	}
 	return true
 }
@@ -61,8 +71,8 @@ func (iter *listIter) next() *KVEntry {
 	var next *node
 	for {
 		next = iter.current.next
-		if next.next != nil && next.key.Compare(next.next.key) == 0 {
-			if next.next.seq < iter.seq {
+		if next != nil && next.key.Compare(iter.current.key) == 0 {
+			if next.seq < iter.seq {
 				// next's next have same key but larger sequence, move on to next's next
 				iter.current = next
 				continue
@@ -70,12 +80,13 @@ func (iter *listIter) next() *KVEntry {
 		}
 		break
 	}
-	iter.current = next
-	return &KVEntry{
-		Key:        next.key,
-		TableValue: *next.value,
-		Seq:        next.seq,
+	entry := &KVEntry{
+		Key:        iter.current.key,
+		TableValue: *iter.current.value,
+		Seq:        iter.current.seq,
 	}
+	iter.current = next
+	return entry
 }
 
 type combinedIterItem struct {

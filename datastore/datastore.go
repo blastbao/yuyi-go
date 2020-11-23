@@ -162,7 +162,7 @@ func New(lg *zap.Logger, name uuid.UUID, cfg *shared.Config) (*DataStore, error)
 		lg:                  lg,
 		name:                name,
 		nameString:          name.String(),
-		memTableMaxCapacity: 256 * 1024,
+		memTableMaxCapacity: 512 * 1024,
 		activeMemTable:      NewMemTable(),
 		sealedMemTables:     make([]*MemTable, 0),
 		btree:               btree,
@@ -269,13 +269,21 @@ func (store *DataStore) replayWal(seq uint64, offset int) error {
 		return err
 	}
 
-	complete := make(chan error, 1)
+	complete := make(chan error, 10)
 	blockChan := replayer.Replay(complete)
 	for {
 		select {
-		case block := <-blockChan:
-			// Todo: active memory table's last wal address should be updated here
-			store.putActive(parseKVEntryBytes(block))
+		case block, more := <-blockChan:
+			if more {
+				// Todo: active memory table's last wal address should be updated here
+				store.putActive(parseKVEntryBytes(block))
+				store.committed++
+				store.uncommitted++
+			} else {
+				// log finished
+				return nil
+			}
+
 		case err := <-complete:
 			return err
 		}
@@ -368,7 +376,7 @@ func (store *DataStore) List(start Key, end Key, max int) (*ListResult, error) {
 			iters = append(iters, memtable.List(start, end, committed))
 		}
 		treeInfo := store.btree.lastTreeInfo
-		if treeInfo.walSequence > committed {
+		if treeInfo != nil && treeInfo.walSequence > committed {
 			// current tree contains uncommitted content, retry list
 			continue
 		}
@@ -402,7 +410,7 @@ func (store *DataStore) List(start Key, end Key, max int) (*ListResult, error) {
 	if iterator.hasNext() {
 		entry := iterator.next()
 		compareRes := entry.Key.Compare(next)
-		if compareRes <= 0 {
+		if next == nil || compareRes <= 0 {
 			next = entry.Key
 		}
 	}
@@ -430,10 +438,10 @@ func (store *DataStore) handleMutations() {
 }
 
 func (store *DataStore) putActive(entry *KVEntry) {
+	store.mtMu.Lock()
+	defer store.mtMu.Unlock()
 	size := entry.size()
 	for store.activeMemTable.capacity+size > store.memTableMaxCapacity {
-		store.mtMu.Lock()
-		defer store.mtMu.Unlock()
 
 		// double check if need seal current active
 		if store.activeMemTable.capacity+size > store.memTableMaxCapacity {
