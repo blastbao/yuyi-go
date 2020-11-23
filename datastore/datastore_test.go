@@ -49,7 +49,7 @@ func TestPutEntries(t *testing.T) {
 	}
 
 	// wait tree dumper finished
-	time.Sleep(15 * time.Second)
+	time.Sleep(5 * time.Second)
 
 	// init datastore with latest tree record
 	datastore2, err := New(zap.NewExample(), name, cfg)
@@ -145,7 +145,7 @@ func TestWalReplayer(t *testing.T) {
 		select {
 		case _, ok := <-blockChan:
 			if !ok {
-				if count != runtime.NumCPU()*100 {
+				if count != runtime.NumCPU()*2000 {
 					t.Error("Total count mismatch")
 				}
 				return

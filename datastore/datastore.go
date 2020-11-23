@@ -464,30 +464,31 @@ func (store *DataStore) asyncWriteCallback(addr chunk.Address, err error) {
 		return
 	}
 	// update wal address in memory table and increase committed sequence
-	store.committed++
 	store.updateWalAddr(addr)
+	store.committed++
 }
 
 var ErrUpdateWalAddr = errors.New("Update wal addr for memory table failed")
 
 func (store *DataStore) updateWalAddr(addr chunk.Address) error {
+	seq := store.committed + 1
 	for {
 		active := store.activeMemTable
 		// check if update active wal address first
-		if store.committed <= active.lastSeq && store.committed >= active.firstSeq {
+		if seq <= active.lastSeq && seq >= active.firstSeq {
 			active.lastWalAddr = addr
 			return nil
 		}
 
 		// check if update sealed wal addr
-		if store.committed < active.lastSeq {
+		if seq < active.lastSeq {
 			break
 		}
 	}
 
 	// check if update the addr to sealed memory table
 	for _, sealed := range store.sealedMemTables {
-		if store.committed <= sealed.lastSeq && store.committed >= sealed.firstSeq {
+		if seq <= sealed.lastSeq && seq >= sealed.firstSeq {
 			sealed.lastWalAddr = addr
 			return nil
 		}
