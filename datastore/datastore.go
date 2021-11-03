@@ -18,13 +18,13 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/shared"
 	"io/ioutil"
 	"os"
 	"sync"
 	"sync/atomic"
 	"time"
-	"yuyi-go/datastore/chunk"
-	"yuyi-go/shared"
 
 	"gopkg.in/yaml.v2"
 
@@ -433,6 +433,8 @@ func (store *DataStore) handleMutations() {
 
 		// async write wal for this entry.
 		bytes := mutation.entry.buildBytes(store.name)
+
+		// 
 		store.walWriter.AsyncWrite(bytes, mutation.complete, store.asyncWriteCallback)
 	}
 }

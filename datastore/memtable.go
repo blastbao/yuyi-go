@@ -16,10 +16,10 @@ package datastore
 
 import (
 	"bytes"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
 	"math/rand"
 	"sync/atomic"
 	"unsafe"
-	"yuyi-go/datastore/chunk"
 )
 
 type MemTable struct {

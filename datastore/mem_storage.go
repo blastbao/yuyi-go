@@ -15,7 +15,7 @@
 package datastore
 
 import (
-	"yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
 
 	"github.com/google/uuid"
 )

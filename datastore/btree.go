@@ -15,8 +15,8 @@
 package datastore
 
 import (
-	"yuyi-go/datastore/chunk"
-	"yuyi-go/shared"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/shared"
 
 	"go.uber.org/zap"
 )
@@ -47,6 +47,7 @@ func NewBTree(lg *zap.Logger, treeInfoYaml *TreeInfoYaml, cfg *shared.Config) (*
 	if err != nil {
 		return nil, err
 	}
+
 	// create last tree info
 	var treeInfo *TreeInfo
 	if treeInfoYaml != nil {

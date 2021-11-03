@@ -21,7 +21,7 @@ import (
 	"sort"
 	"testing"
 
-	"yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
 
 	"go.uber.org/zap"
 )

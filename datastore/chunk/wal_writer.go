@@ -18,11 +18,11 @@ import (
 	"bufio"
 	"encoding/binary"
 	"fmt"
+	"github.com/blastbao/yuyi-go/shared"
 	"hash/crc32"
 	"io"
 	"os"
 	"time"
-	"yuyi-go/shared"
 )
 
 type WalWriter struct {

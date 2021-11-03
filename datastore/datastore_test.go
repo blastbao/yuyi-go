@@ -22,8 +22,8 @@ import (
 	"sync"
 	"testing"
 	"time"
-	"yuyi-go/datastore/chunk"
-	"yuyi-go/shared"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/shared"
 
 	"github.com/google/uuid"
 	"go.uber.org/zap"

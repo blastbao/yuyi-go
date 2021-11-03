@@ -17,11 +17,11 @@ package chunk
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/blastbao/yuyi-go/shared"
 	"io/ioutil"
 	"os"
 	"sync"
 	"time"
-	"yuyi-go/shared"
 
 	"github.com/google/uuid"
 )

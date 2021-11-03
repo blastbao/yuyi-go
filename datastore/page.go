@@ -17,8 +17,8 @@ package datastore
 import (
 	"bytes"
 
-	"yuyi-go/datastore/chunk"
-	"yuyi-go/shared"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/shared"
 )
 
 type PageType byte

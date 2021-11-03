@@ -17,8 +17,8 @@ package datastore
 import (
 	"fmt"
 
-	"yuyi-go/datastore/chunk"
-	"yuyi-go/shared"
+	"github.com/blastbao/yuyi-go/datastore/chunk"
+	"github.com/blastbao/yuyi-go/shared"
 
 	"go.uber.org/zap"
 )

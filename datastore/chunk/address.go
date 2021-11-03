@@ -17,8 +17,8 @@ package chunk
 import (
 	"bytes"
 	"fmt"
+	"github.com/blastbao/yuyi-go/shared"
 	"sync/atomic"
-	"yuyi-go/shared"
 
 	"github.com/google/uuid"
 )

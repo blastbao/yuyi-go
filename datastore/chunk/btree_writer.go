@@ -15,8 +15,8 @@
 package chunk
 
 import (
+	"github.com/blastbao/yuyi-go/shared"
 	"io"
-	"yuyi-go/shared"
 )
 
 type BtreeWriter struct {
